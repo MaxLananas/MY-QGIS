@@ -1,0 +1,155 @@
+name: 🚀 Fast build
+
+# NOTE (fork): builds ONLY the desktop 'qgis' target with the minimal speed
+# configuration (unity builds, mold linker, no Python/server/GRASS/Oracle/
+# HANA/PDAL/EPT/3D/QtWebEngine, no tests). It reuses the prebuilt build-deps
+# Docker image published by the QGIS project and a rolling ccache, so a warm
+# run compiles only what changed instead of the whole codebase.
+# Manual only — it never runs automatically, so it costs nothing unless you
+# click "Run workflow".
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BUILD_IMAGE: qgis/qgis3-ubuntu-qt6-build-deps-bin-only:master
+  BUILD_DIR: /root/QGIS/build-fast
+
+jobs:
+  build:
+    name: fast desktop build (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: 🐣 Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 🧹 Reclaim disk space
+        run: |
+          df . -h
+          sudo rm -rf /usr/local/lib/android/ || true
+          df . -h
+
+      - name: 🐳 Pull the prebuilt QGIS build-deps image (falls back to a local build)
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Prebuilt image pull failed — building the image locally (one-time slow path)."
+            docker build --target binary-only \
+              -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile \
+              -t "${BUILD_IMAGE}" .
+          }
+
+      - name: 💾 Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: fastbuild-ccache-${{ github.run_id }}
+          restore-keys: |
+            fastbuild-ccache-
+
+      - name: 🌱 Configure (minimal speed preset)
+        run: |
+          docker run --rm \
+            -v $(pwd):/root/QGIS \
+            -v $(pwd)/.ccache:/root/.ccache \
+            --env-file .docker/docker-variables.env \
+            -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -e
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 1G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              cmake -S /root/QGIS -B '"${BUILD_DIR}"' -G Ninja \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_C_COMPILER=/usr/bin/clang \
+                -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+                -DUSE_CCACHE=ON \
+                -DUSE_ALTERNATE_LINKER=mold \
+                -DWITH_DESKTOP=ON \
+                -DWITH_GUI=ON \
+                -DWITH_ANALYSIS=ON \
+                -DWITH_PYTHON=OFF \
+                -DWITH_BINDINGS=OFF \
+                -DWITH_3D=OFF \
+                -DWITH_SERVER=OFF \
+                -DWITH_ORACLE=OFF \
+                -DWITH_HANA=OFF \
+                -DWITH_PDAL=OFF \
+                -DWITH_EPT=OFF \
+                -DWITH_GRASS7=OFF \
+                -DWITH_GRASS8=OFF \
+                -DWITH_GRASS_PLUGIN=OFF \
+                -DWITH_QUICK=OFF \
+                -DWITH_QTWEBENGINE=OFF \
+                -DWITH_PDF4QT=OFF \
+                -DWITH_CUSTOM_WIDGETS=OFF \
+                -DWITH_QGIS_PROCESS=OFF \
+                -DWITH_SFCGAL=OFF \
+                -DWITH_GEOGRAPHICLIB=OFF \
+                -DWITH_STAGED_PLUGINS=OFF \
+                -DWITH_QSPATIALITE=OFF \
+                -DWITH_APIDOC=OFF \
+                -DENABLE_TESTS=OFF \
+                -DENABLE_MODELTEST=OFF \
+                -DWITH_INTERNAL_SPATIALINDEX=ON \
+                -DENABLE_UNITY_BUILDS=ON
+            '
+
+      - name: 🌋 Build (qgis target only)
+        run: |
+          docker run --rm \
+            -v $(pwd):/root/QGIS \
+            -v $(pwd)/.ccache:/root/.ccache \
+            --env-file .docker/docker-variables.env \
+            -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -e
+              git config --global --add safe.directory /root/QGIS
+              export CCACHE_DIR=/root/.ccache
+              ccache -z
+              START=$SECONDS
+              cmake --build '"${BUILD_DIR}"' --target qgis
+              ELAPSED=$(( SECONDS - START ))
+              echo "${ELAPSED}" > /root/QGIS/build_seconds
+              echo "==> Build finished in ${ELAPSED}s"
+              echo "==> ccache statistics:"
+              ccache -s | tail -8 | tee /root/QGIS/ccache_stats.txt
+            '
+
+      - name: 📊 Write timing summary
+        if: always()
+        run: |
+          SECONDS_BUILT=$(cat build_seconds 2>/dev/null || echo "n/a")
+          {
+            echo "## 🚀 Fast build result"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Build step duration | ${SECONDS_BUILT}s |"
+            echo "| Configuration | Debug, unity builds, mold, no Python/server/GRASS/Oracle/HANA/PDAL/EPT/3D |"
+            echo "| Target | \`qgis\` only |"
+            echo ""
+            echo '```'
+            cat ccache_stats.txt 2>/dev/null || true
+            echo '```'
+            echo ""
+            echo "> First ever run (cold ccache) is the slow one; subsequent runs recompile only what changed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 💾 Save ccache
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: fastbuild-ccache-${{ github.run_id }}

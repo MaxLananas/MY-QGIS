@@ -24,7 +24,60 @@ vite le quota de stockage GitHub Actions. Tout a donc été retiré :
 Pour réactiver un déclencheur automatique, remettez simplement le bloc `on:`
 souhaité en tête du fichier de workflow concerné.
 
-## 2. Thèmes « Aurora » (interface moderne)
+## 2. Builds ultra-rapides
+
+QGIS est un monstre C++ (~2,7 M de lignes) : **un build complet à froid ne
+pourra jamais durer 2 minutes** (comptez ~30–60 min, une seule fois). En
+revanche, tout a été mis en place pour que **chaque rebuild après le premier
+soit de l'ordre de quelques secondes à 2 minutes** :
+
+### En local
+
+```bash
+./scripts/qgis-fastbuild.sh          # build la cible 'qgis' (app complète)
+./scripts/qgis-fastbuild.sh qgis_gui # rebuild d'une seule bibliothèque
+QGIS_FAST_PRESET=fast-python ./scripts/qgis-fastbuild.sh   # avec Python
+```
+
+Tous les leviers sont enfoncés en même temps :
+
+- **Ninja** + **ccache** : ce qui n'a pas changé n'est pas recompilé ;
+- **Unity builds** (`ENABLE_UNITY_BUILDS=ON`) : plusieurs .cpp par unité de
+  compilation → beaucoup moins d'invocations du compilateur ;
+- **En-têtes précompilés** + **linker `mold`** (auto-détecté, sinon `lld`)
+  : l'édition de liens finale passe de minutes à secondes ;
+- **Ensemble de fonctionnalités minimal** via `CMakePresets.json`
+  (`cmake --preset fast`) : pas de Python, serveur, GRASS, Oracle, HANA,
+  PDAL, EPT, 3D, QtWebEngine, tests ni doc API ;
+- **Cible unique** : on ne build que `qgis`, pas « all ».
+
+Presets disponibles : `fast` (Debug, sans Python — le plus rapide),
+`fast-python` (Debug + Python), `fast-release` (Release + Python).
+Les variantes Python conservent la toolbox Processing et les plugins.
+Astuce : après modification d'un .cpp isolé, le rebuild est quasi instantané
+(quelques secondes + link). Modifier un en-tête central reste plus coûteux —
+c'est une limite physique du C++.
+
+### Sur GitHub Actions
+
+Nouveau workflow manuel **🚀 Fast build** (`fast-build.yml`, bouton
+« Run workflow » uniquement, donc 0 minute consommée tant que tu ne le
+lances pas) :
+
+- réutilise l'image Docker `build-deps` **déjà publiée par le projet QGIS**
+  (plus de 40 min de préparation d'image gagnées ; bascule sur un build
+  local si l'image n'est pas disponible) ;
+- ccache « roulant » restauré à chaque run : seul le diff depuis le dernier
+  run est recompilé ;
+- build de la seule cible `qgis` avec unity + mold ;
+- résumé du temps de build dans l'onglet « Summary » du run.
+
+À noter aussi : les workflows manuels Windows et macOS sont passés des
+runners « blacksmith » (service payant non configuré sur ce fork, les jobs
+resteraient bloqués) aux runners GitHub standard inclus dans les repos
+publics.
+
+## 3. Thèmes « Aurora » (interface moderne)
 
 Deux nouveaux thèmes installés dans `resources/themes/` :
 
@@ -41,7 +94,7 @@ les personnes qui n'avaient jamais choisi de thème ; les choix existants
 (`UI/UITheme`) sont conservés. Changement de thème à tout moment :
 *Préférences ▸ Général ▸ Thème* (redémarrage nécessaire).
 
-## 3. Écran d'accueil : prise en main
+## 4. Écran d'accueil : prise en main
 
 - Nouvel onglet **« Learn »** : parcours « Démarrez en cinq minutes »
   (créer un projet, ajouter des données, styliser, sauvegarder) avec boutons
@@ -55,7 +108,7 @@ les personnes qui n'avaient jamais choisi de thème ; les choix existants
 - Nouvelle action **Projet ▸ Welcome Screen** pour rouvrir l'écran d'accueil
   à tout moment depuis la fenêtre principale.
 
-## 4. Politique IA du projet amont
+## 5. Politique IA du projet amont
 
 Le dépôt amont QGIS interdit les contributions assistées par IA (voir
 `AGENTS.md` et la QEP-408). Ces modifications vivent uniquement dans ce fork :

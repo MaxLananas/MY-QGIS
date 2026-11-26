@@ -27,7 +27,7 @@ jobs:
             deployment-target: "11.0"
             osx-architecture: "arm64"
     name: build (macos)
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: macos-latest
 
     steps:
       - name: 🐣 Checkout
