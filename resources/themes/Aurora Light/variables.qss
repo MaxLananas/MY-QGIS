@@ -1,0 +1,17 @@
+@background: #eef0f4
+@itembackground: #e6eaf0
+@itemalternativebackground: #e3e7ee
+@itemdarkbackground: #d5dae2
+@lightgradient: #ffffff
+@lightalternativegradient: #f2f5f9
+@darkgradient: #f2f5f9
+@darkalternativegradient: #e6eaf0
+@gradient: #f2f5f9
+@textlight: #2a3138
+@text: #3c4653
+@toggleoff: #dde2e9
+@toggleon: #3574f0
+@selection: #3574f0
+@hover: #e3e7ee
+@focusdark: rgba(53,116,240,90)
+@focus: #3574f0
