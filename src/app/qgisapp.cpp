@@ -2969,7 +2969,7 @@ void QgisApp::applyDefaultSettingsToCanvas( QgsMapCanvas *canvas )
 void QgisApp::readSettings()
 {
   QgsSettings settings;
-  const QString themeName = settings.value( u"UI/UITheme"_s, "default" ).toString();
+  const QString themeName = settings.value( u"UI/UITheme"_s, u"Aurora" ).toString();
   setTheme( themeName );
 
   // Read legacy settings

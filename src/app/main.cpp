@@ -1565,7 +1565,7 @@ int main( int argc, char *argv[] )
   // Set the application style.  If it's not set QT will use the platform style except on Windows
   // as it looks really ugly so we use QPlastiqueStyle.
   QString desiredStyle = settings.value( u"qgis/style"_s ).toString();
-  const QString theme = settings.value( u"UI/UITheme"_s ).toString();
+  const QString theme = settings.value( u"UI/UITheme"_s, u"Aurora" ).toString();
   if ( theme != "default"_L1 )
   {
     if ( QStyleFactory::keys().contains( u"fusion"_s, Qt::CaseInsensitive ) )
