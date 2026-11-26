@@ -42,13 +42,25 @@ QGIS_FAST_PRESET=fast-python ./scripts/qgis-fastbuild.sh   # avec Python
 Tous les leviers sont enfoncés en même temps :
 
 - **Ninja** + **ccache** : ce qui n'a pas changé n'est pas recompilé ;
+- **ccache réglé selon le manuel officiel** (`ccache(1)`) :
+  `sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime`
+  (exigence documentée pour les en-têtes précompilés),
+  `hash_dir=false` (le cache survit à un déplacement du dossier de build :
+  autre chemin de clone, conteneur CI…), `compiler_check=content`,
+  `inode_cache` quand le ccache le supporte. `depend_mode` est volontairement
+  **écarté** : le manuel documente un taux de hit inférieur en échange —
+  contre-productif ici ;
 - **Unity builds** (`ENABLE_UNITY_BUILDS=ON`) : plusieurs .cpp par unité de
-  compilation → beaucoup moins d'invocations du compilateur ;
-- **En-têtes précompilés** + **linker `mold`** (auto-détecté, sinon `lld`)
-  : l'édition de liens finale passe de minutes à secondes ;
-- **Ensemble de fonctionnalités minimal** via `CMakePresets.json`
+  compilation (lots de 8, défaut CMake) → beaucoup moins d'invocations du
+  compilateur ;
+- **En-têtes précompilés** (`USE_PRECOMPILED_HEADERS`, déjà fourni par QGIS)
+  + **info de debug allégée `-g1`** (tables de lignes uniquement, GCC/Clang
+  uniquement) : objets plus petits, compilations et liens plus rapides ;
+- **linker `mold`** (auto-détecté, sinon `lld`) : l'édition de liens finale
+  passe de minutes à secondes ;
+- **Ensemble de fonctionnalités minimal** via `CMakeUserPresets.json`
   (`cmake --preset fast`) : pas de Python, serveur, GRASS, Oracle, HANA,
-  PDAL, EPT, 3D, QtWebEngine, tests ni doc API ;
+  PDAL, EPT, 3D, QtWebEngine, Wayland, QtSerialPort, tests ni doc API ;
 - **Cible unique** : on ne build que `qgis`, pas « all ».
 
 Presets disponibles : `fast` (Debug, sans Python — le plus rapide),
@@ -57,6 +69,13 @@ Les variantes Python conservent la toolbox Processing et les plugins.
 Astuce : après modification d'un .cpp isolé, le rebuild est quasi instantané
 (quelques secondes + link). Modifier un en-tête central reste plus coûteux —
 c'est une limite physique du C++.
+
+Le script a aussi deux modes utilitaires :
+
+```bash
+./scripts/qgis-fastbuild.sh --doctor   # audit de l'environnement (outils, cache, presets)
+./scripts/qgis-fastbuild.sh --clean    # repart de zéro
+```
 
 ### Sur GitHub Actions
 
@@ -69,13 +88,23 @@ lances pas) :
   local si l'image n'est pas disponible) ;
 - ccache « roulant » restauré à chaque run : seul le diff depuis le dernier
   run est recompilé ;
-- build de la seule cible `qgis` avec unity + mold ;
-- résumé du temps de build dans l'onglet « Summary » du run.
+- build de la seule cible `qgis` avec unity + mold + `-g1` ;
+- choix du preset (`fast`, `fast-python`, `fast-release`) et du runner au
+  lancement. Par défaut : runner standard **gratuit** ; les runners «
+  -N-cores » accélèrent le build à froid mais sont **facturés même sur les
+  dépôts publics** (règle GitHub documentée) — à réserver aux runs où le
+  temps compte ;
+- résumé du temps de build + hit-rate ccache dans l'onglet « Summary ».
 
 À noter aussi : les workflows manuels Windows et macOS sont passés des
 runners « blacksmith » (service payant non configuré sur ce fork, les jobs
 resteraient bloqués) aux runners GitHub standard inclus dans les repos
 publics.
+
+**Sources officielles consultées** : man `ccache(1)` (modes, sloppiness, PCH,
+`hash_dir`), manuel Ninja (parallélisme), docs CMake
+(`UNITY_BUILD_BATCH_SIZE`, presets), dépôt mold (performance de link),
+documentation GitHub Actions (runners et facturation).
 
 ## 3. Thèmes « Aurora » (interface moderne)
 

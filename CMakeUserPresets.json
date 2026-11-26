@@ -38,6 +38,8 @@
         "WITH_STAGED_PLUGINS": "OFF",
         "WITH_QSPATIALITE": "OFF",
         "WITH_APIDOC": "OFF",
+        "WITH_WAYLAND": "OFF",
+        "WITH_QTSERIALPORT": "OFF",
         "ENABLE_TESTS": "OFF",
         "ENABLE_MODELTEST": "OFF",
         "WITH_INTERNAL_SPATIALINDEX": "ON",

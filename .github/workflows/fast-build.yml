@@ -1,10 +1,11 @@
 name: 🚀 Fast build
 
 # NOTE (fork): builds ONLY the desktop 'qgis' target with the minimal speed
-# configuration (unity builds, mold linker, no Python/server/GRASS/Oracle/
-# HANA/PDAL/EPT/3D/QtWebEngine, no tests). It reuses the prebuilt build-deps
-# Docker image published by the QGIS project and a rolling ccache, so a warm
-# run compiles only what changed instead of the whole codebase.
+# configuration (unity builds, mold linker, slim -g1 debug info, no Python/
+# server/GRASS/Oracle/HANA/PDAL/EPT/3D/QtWebEngine, no tests). It reuses the
+# prebuilt build-deps Docker image published by the QGIS project and a
+# rolling ccache, so a warm run compiles only what changed instead of the
+# whole codebase.
 # Manual only — it never runs automatically, so it costs nothing unless you
 # click "Run workflow".
 
@@ -14,6 +15,26 @@ concurrency:
 
 on:
   workflow_dispatch:
+    inputs:
+      preset:
+        description: 'CMake configure preset'
+        required: false
+        default: 'fast'
+        type: choice
+        options:
+          - fast
+          - fast-python
+          - fast-release
+      runner:
+        description: 'Runner (bigger = faster but billed even on public repos)'
+        required: false
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-4-cores
+          - ubuntu-latest-8-cores
+          - ubuntu-latest-16-cores
 
 permissions:
   contents: read
@@ -24,8 +45,8 @@ env:
 
 jobs:
   build:
-    name: fast desktop build (linux)
-    runs-on: ubuntu-latest
+    name: fast desktop build (linux, ${{ inputs.preset || 'fast' }})
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 300
 
     steps:
@@ -54,11 +75,17 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ccache
-          key: fastbuild-ccache-${{ github.run_id }}
+          key: fastbuild-ccache-${{ inputs.preset || 'fast' }}-${{ github.run_id }}
           restore-keys: |
+            fastbuild-ccache-${{ inputs.preset || 'fast' }}-
             fastbuild-ccache-
 
-      - name: 🌱 Configure (minimal speed preset)
+      # One configure step: presets + linker + slim debug info, then a single
+      # ninja invocation builds the app. Values follow ccache(1): the
+      # sloppiness set is the documented PCH requirement, hash_dir=false keeps
+      # the cache valid across build directories, depend_mode is deliberately
+      # off (the manual documents a lower hit rate as its trade-off).
+      - name: 🌱 Configure + build (minimal speed preset)
         run: |
           docker run --rm \
             -v $(pwd):/root/QGIS \
@@ -68,19 +95,28 @@ jobs:
             "${BUILD_IMAGE}" bash -c '
               set -e
               git config --global --add safe.directory /root/QGIS
+              echo "==> toolchain: $(cmake --version | head -1) / $(ninja --version) / $(ccache --version | head -1)"
               ccache -M 1G
               ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              ccache --set-config inode_cache=true || true
+              ccache -z
+              PRESET="${{ inputs.preset || 'fast' }}"
               cmake -S /root/QGIS -B '"${BUILD_DIR}"' -G Ninja \
-                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_BUILD_TYPE=$([ "${PRESET}" = "fast-release" ] && echo Release || echo Debug) \
                 -DCMAKE_C_COMPILER=/usr/bin/clang \
                 -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+                -DCMAKE_C_FLAGS_DEBUG=-g1 \
+                -DCMAKE_CXX_FLAGS_DEBUG=-g1 \
                 -DUSE_CCACHE=ON \
                 -DUSE_ALTERNATE_LINKER=mold \
                 -DWITH_DESKTOP=ON \
                 -DWITH_GUI=ON \
                 -DWITH_ANALYSIS=ON \
-                -DWITH_PYTHON=OFF \
-                -DWITH_BINDINGS=OFF \
+                -DWITH_PYTHON=$([ "${PRESET}" = "fast" ] && echo OFF || echo ON) \
+                -DWITH_BINDINGS=$([ "${PRESET}" = "fast" ] && echo OFF || echo ON) \
+                -DWITH_STAGED_PLUGINS=$([ "${PRESET}" = "fast" ] && echo OFF || echo ON) \
                 -DWITH_3D=OFF \
                 -DWITH_SERVER=OFF \
                 -DWITH_ORACLE=OFF \
@@ -97,30 +133,16 @@ jobs:
                 -DWITH_QGIS_PROCESS=OFF \
                 -DWITH_SFCGAL=OFF \
                 -DWITH_GEOGRAPHICLIB=OFF \
-                -DWITH_STAGED_PLUGINS=OFF \
                 -DWITH_QSPATIALITE=OFF \
+                -DWITH_WAYLAND=OFF \
+                -DWITH_QTSERIALPORT=OFF \
                 -DWITH_APIDOC=OFF \
                 -DENABLE_TESTS=OFF \
                 -DENABLE_MODELTEST=OFF \
                 -DWITH_INTERNAL_SPATIALINDEX=ON \
-                -DENABLE_UNITY_BUILDS=ON
-            '
-
-      - name: 🌋 Build (qgis target only)
-        run: |
-          docker run --rm \
-            -v $(pwd):/root/QGIS \
-            -v $(pwd)/.ccache:/root/.ccache \
-            --env-file .docker/docker-variables.env \
-            -e CCACHE_DIR=/root/.ccache \
-            "${BUILD_IMAGE}" bash -c '
-              set -e
-              git config --global --add safe.directory /root/QGIS
-              export CCACHE_DIR=/root/.ccache
-              ccache -z
-              START=$SECONDS
-              cmake --build '"${BUILD_DIR}"' --target qgis
-              ELAPSED=$(( SECONDS - START ))
+                -DENABLE_UNITY_BUILDS=ON \
+                && cmake --build '"${BUILD_DIR}"' --target qgis
+              ELAPSED=$SECONDS
               echo "${ELAPSED}" > /root/QGIS/build_seconds
               echo "==> Build finished in ${ELAPSED}s"
               echo "==> ccache statistics:"
@@ -136,9 +158,11 @@ jobs:
             echo ""
             echo "| Metric | Value |"
             echo "|---|---|"
-            echo "| Build step duration | ${SECONDS_BUILT}s |"
-            echo "| Configuration | Debug, unity builds, mold, no Python/server/GRASS/Oracle/HANA/PDAL/EPT/3D |"
+            echo "| Build duration (configure+build) | ${SECONDS_BUILT}s |"
+            echo "| Preset | \`${{ inputs.preset || 'fast' }}\` |"
+            echo "| Runner | \`${{ inputs.runner || 'ubuntu-latest' }}\` |"
             echo "| Target | \`qgis\` only |"
+            echo "| Speed levers | unity builds, mold, -g1, ccache (hash_dir=false), minimal features |"
             echo ""
             echo '```'
             cat ccache_stats.txt 2>/dev/null || true
@@ -152,4 +176,4 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ccache
-          key: fastbuild-ccache-${{ github.run_id }}
+          key: fastbuild-ccache-${{ inputs.preset || 'fast' }}-${{ github.run_id }}
