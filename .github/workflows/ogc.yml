@@ -5,21 +5,9 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
-    branches:
-      - master
-      - release-**
-      - queued_ltr_backports
-    paths:
-    - 'src/core/**'
-    - 'src/auth/**'
-    - 'src/providers/**'
-    - 'src/server/**'
-    - 'src/CMakeLists.txt'
-    - 'external/**'
-    - 'CMakeLists.txt'
-    - '.github/workflows/ogc.yml'
-    - '.ci/ogc/**'
+  # NOTE (fork): heavy OGC docker builds no longer run automatically on push;
+  # launch manually or via pull_request if you work on QGIS Server.
+  workflow_dispatch:
   pull_request:
     branches:
       - master
