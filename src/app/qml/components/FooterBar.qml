@@ -7,6 +7,7 @@ Rectangle {
   
   signal supportClicked
   signal websiteClicked
+  signal docsClicked
   
   implicitHeight: Math.max(60, footerText.contentHeight + 10)
   color: "transparent"
@@ -45,6 +46,21 @@ Rectangle {
       font.bold: true
       background.layer.enabled: false
       onClicked: root.supportClicked()
+    }
+
+    RoundButton {
+      Layout.preferredWidth: implicitWidth * 1.2
+      radius: implicitHeight / 2
+      rightInset: 0
+      leftInset: 0
+      visible: root.width >= 480
+      highlighted: true
+      Material.accent: "#2e6e8e"
+      text: qsTr("Documentation")
+      font.pointSize: tinyFontSize
+      font.bold: true
+      background.layer.enabled: false
+      onClicked: root.docsClicked()
     }
 
     RoundButton {

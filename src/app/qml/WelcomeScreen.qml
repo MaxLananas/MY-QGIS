@@ -25,6 +25,60 @@ Item {
   Material.accent: "#93b023"
   Material.foreground: "#ffffff"
 
+  component ActionPill : Rectangle {
+    id: actionPill
+
+    property alias label: actionPillLabel.text
+    property bool primary: false
+    property bool hovered: false
+    signal activated
+
+    height: 26 * layoutSizeFactor
+    width: actionPillLabel.implicitWidth + 24
+    radius: height / 2
+    color: actionPill.hovered ? ( primary ? "#4d8529" : "#f2f7ef" ) : ( primary ? "#589632" : "transparent" )
+    border.width: 1
+    border.color: primary ? "#589632" : "#93b023"
+
+    Text {
+      id: actionPillLabel
+      anchors.centerIn: parent
+      font.pointSize: tinyFontSize
+      font.bold: true
+      color: actionPill.primary ? "#ffffff" : "#2f6b24"
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      hoverEnabled: true
+      onEntered: actionPill.hovered = true
+      onExited: actionPill.hovered = false
+      onClicked: actionPill.activated()
+    }
+  }
+
+  component KeyCap : Rectangle {
+    id: keyCap
+
+    property alias label: keyCapLabel.text
+
+    width: keyCapLabel.implicitWidth + 14
+    height: 22 * layoutSizeFactor
+    radius: 4
+    color: "#eef1f4"
+    border.width: 1
+    border.color: "#d3d9e0"
+
+    Text {
+      id: keyCapLabel
+      anchors.centerIn: parent
+      font.pointSize: tinyFontSize
+      font.bold: true
+      color: "#3c4653"
+    }
+  }
+
   ColumnLayout {
     anchors.fill: parent
     anchors.margins: 20
@@ -128,6 +182,14 @@ Item {
               }
               TabButton {
                 text: qsTr("Templates")
+                width: implicitWidth
+                font.pointSize: largeFontSize
+                font.bold: true
+                background: null
+                focusPolicy: Qt.NoFocus
+              }
+              TabButton {
+                text: qsTr("Learn")
                 width: implicitWidth
                 font.pointSize: largeFontSize
                 font.bold: true
@@ -497,6 +559,322 @@ Item {
                 }
               }
             }
+
+            ScrollView {
+              id: learnScrollView
+              anchors.fill: parent
+              clip: true
+              visible: tabBar.currentIndex === 2
+              contentWidth: learnLayout.width
+              contentHeight: learnLayout.height
+              rightPadding: 12
+
+              ScrollBar.vertical: CustomScrollBar {
+                policy: ScrollBar.AsNeeded
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+              }
+
+              ColumnLayout {
+                id: learnLayout
+                width: learnScrollView.width - learnScrollView.rightPadding
+                spacing: 12
+
+                Rectangle {
+                  Layout.preferredWidth: parent.width
+                  Layout.preferredHeight: getStartedColumn.childrenRect.height + 32
+                  radius: 6
+                  color: "#ffffff"
+
+                  ColumnLayout {
+                    id: getStartedColumn
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 10
+
+                    Text {
+                      text: qsTr("Get started in five minutes")
+                      font.pointSize: normalFontSize
+                      font.bold: true
+                      color: "black"
+                    }
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 10
+
+                      Rectangle {
+                        width: 22 * layoutSizeFactor
+                        height: 22 * layoutSizeFactor
+                        radius: height / 2
+                        color: "#589632"
+
+                        Text {
+                          anchors.centerIn: parent
+                          text: "1"
+                          font.pointSize: tinyFontSize
+                          font.bold: true
+                          color: "#ffffff"
+                        }
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Create a project — start from a blank canvas or build one around an online basemap.")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+
+                    RowLayout {
+                      spacing: 8
+
+                      ActionPill {
+                        label: qsTr("New blank project")
+                        primary: true
+                        onActivated: {
+                          welcomeScreenController.createBlankProject();
+                          welcomeScreenController.hideScene();
+                        }
+                      }
+
+                      ActionPill {
+                        label: qsTr("New project from a basemap")
+                        onActivated: {
+                          welcomeScreenController.createProjectFromBasemap();
+                          welcomeScreenController.hideScene();
+                        }
+                      }
+                    }
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 10
+
+                      Rectangle {
+                        width: 22 * layoutSizeFactor
+                        height: 22 * layoutSizeFactor
+                        radius: height / 2
+                        color: "#589632"
+
+                        Text {
+                          anchors.centerIn: parent
+                          text: "2"
+                          font.pointSize: tinyFontSize
+                          font.bold: true
+                          color: "#ffffff"
+                        }
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Add your data — drag & drop GeoPackage, shapefile or CSV files onto the map canvas, or use Layer ▸ Add Layer.")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 10
+
+                      Rectangle {
+                        width: 22 * layoutSizeFactor
+                        height: 22 * layoutSizeFactor
+                        radius: height / 2
+                        color: "#589632"
+
+                        Text {
+                          anchors.centerIn: parent
+                          text: "3"
+                          font.pointSize: tinyFontSize
+                          font.bold: true
+                          color: "#ffffff"
+                        }
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Style your layers — double-click a layer in the Layers panel to open the layer styling panel.")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+
+                    RowLayout {
+                      Layout.fillWidth: true
+                      spacing: 10
+
+                      Rectangle {
+                        width: 22 * layoutSizeFactor
+                        height: 22 * layoutSizeFactor
+                        radius: height / 2
+                        color: "#589632"
+
+                        Text {
+                          anchors.centerIn: parent
+                          text: "4"
+                          font.pointSize: tinyFontSize
+                          font.bold: true
+                          color: "#ffffff"
+                        }
+                      }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Save your project — Ctrl+S keeps layers, styles and settings together in a single .qgz file.")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+                  }
+                }
+
+                Rectangle {
+                  Layout.preferredWidth: parent.width
+                  Layout.preferredHeight: shortcutsColumn.childrenRect.height + 32
+                  radius: 6
+                  color: "#ffffff"
+
+                  ColumnLayout {
+                    id: shortcutsColumn
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 10
+
+                    Text {
+                      text: qsTr("Essential shortcuts")
+                      font.pointSize: normalFontSize
+                      font.bold: true
+                      color: "black"
+                    }
+
+                    RowLayout {
+                      spacing: 8
+
+                      KeyCap { label: "Ctrl+K" }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Search projects, layers, algorithms and commands with the locator")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+
+                    RowLayout {
+                      spacing: 8
+
+                      KeyCap { label: "Ctrl+N" }
+                      KeyCap { label: "Ctrl+O" }
+                      KeyCap { label: "Ctrl+S" }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("New, open and save projects")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+
+                    RowLayout {
+                      spacing: 8
+
+                      KeyCap { label: "Ctrl++" }
+                      KeyCap { label: "Ctrl+−" }
+                      KeyCap { label: "Ctrl+Shift+F" }
+
+                      Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Zoom in, zoom out and zoom to the full extent of your data")
+                        font.pointSize: smallFontSize
+                        color: "black"
+                        wrapMode: Text.WordWrap
+                      }
+                    }
+                  }
+                }
+
+                Rectangle {
+                  Layout.preferredWidth: parent.width
+                  Layout.preferredHeight: goFurtherColumn.childrenRect.height + 32
+                  radius: 6
+                  color: "#ffffff"
+
+                  ColumnLayout {
+                    id: goFurtherColumn
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 10
+
+                    Text {
+                      text: qsTr("Go further")
+                      font.pointSize: normalFontSize
+                      font.bold: true
+                      color: "black"
+                    }
+
+                    RowLayout {
+                      spacing: 8
+
+                      ActionPill {
+                        label: qsTr("User manual")
+                        primary: true
+                        onActivated: {
+                          welcomeScreenController.openUserManual();
+                        }
+                      }
+
+                      ActionPill {
+                        label: qsTr("Tutorials")
+                        onActivated: {
+                          Qt.openUrlExternally("https://docs.qgis.org/latest/en/docs/training_manual/");
+                        }
+                      }
+
+                      ActionPill {
+                        label: qsTr("What's new")
+                        onActivated: {
+                          Qt.openUrlExternally("https://qgis.org/project/overview/");
+                        }
+                      }
+
+                      ActionPill {
+                        label: qsTr("Community help")
+                        onActivated: {
+                          Qt.openUrlExternally("https://gis.stackexchange.com/");
+                        }
+                      }
+                    }
+
+                    RowLayout {
+                      spacing: 8
+
+                      ActionPill {
+                        label: qsTr("Keyboard shortcuts…")
+                        onActivated: {
+                          welcomeScreenController.openKeyboardShortcuts();
+                        }
+                      }
+
+                      ActionPill {
+                        label: qsTr("Report an issue")
+                        onActivated: {
+                          welcomeScreenController.reportIssue();
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
 
@@ -612,6 +990,57 @@ Item {
               id: welcomeLayout
               width: welcomeNewsLayout.width - welcomeView.rightPadding
               spacing: 12
+
+              Rectangle {
+                Layout.preferredWidth: parent.width
+                Layout.preferredHeight: firstRunColumn.childrenRect.height + 32
+                radius: 6
+                color: "#ffffff"
+                visible: firstRunGuide && !newsSwitch.checked
+
+                ColumnLayout {
+                  id: firstRunColumn
+                  anchors.fill: parent
+                  anchors.margins: 16
+                  spacing: 10
+
+                  Text {
+                    text: qsTr("New to QGIS?")
+                    font.pointSize: normalFontSize
+                    font.bold: true
+                    color: "black"
+                  }
+
+                  Text {
+                    Layout.fillWidth: true
+                    text: qsTr("Drag & drop your data onto the map, double-click a layer to style it, and press Ctrl+K to search everything. Take the quick tour to learn the essentials.")
+                    font.pointSize: smallFontSize
+                    color: "black"
+                    wrapMode: Text.WordWrap
+                    lineHeight: 1.2
+                  }
+
+                  RowLayout {
+                    spacing: 8
+
+                    ActionPill {
+                      label: qsTr("Show me around")
+                      primary: true
+                      onActivated: {
+                        tabBar.currentIndex = 2;
+                      }
+                    }
+
+                    ActionPill {
+                      label: qsTr("New blank project")
+                      onActivated: {
+                        welcomeScreenController.createBlankProject();
+                        welcomeScreenController.hideScene();
+                      }
+                    }
+                  }
+                }
+              }
 
               Rectangle {
                 Layout.preferredWidth: parent.width
@@ -754,6 +1183,10 @@ Item {
           Qt.openUrlExternally("https://www.qgis.org/funding/donate/")
         }
 
+        onDocsClicked: {
+          Qt.openUrlExternally("https://docs.qgis.org/")
+        }
+
         onWebsiteClicked: {
           Qt.openUrlExternally("https://www.qgis.org/")
         }
@@ -862,7 +1295,7 @@ Item {
   }
 
   Component.onCompleted: {
-    tabBar.currentIndex = recentProjectsListView.count > 0 ? 0 : 1;
+    tabBar.currentIndex = firstRunGuide ? 2 : ( recentProjectsListView.count > 0 ? 0 : 1 );
     if (newsFeedParser.enabled) {
       newsFeedParser.fetch();
     }

@@ -3468,6 +3468,13 @@ void QgisApp::createMenus()
   // Connect once for the entire submenu.
   connect( mRecentProjectsMenu, &QMenu::triggered, this, static_cast<void ( QgisApp::* )( QAction *action )>( &QgisApp::openProject ) );
 
+  // Project menu: re-open the welcome screen on demand
+  QAction *actionShowWelcomeScreen = new QAction( tr( "Welcome Screen" ), this );
+  actionShowWelcomeScreen->setObjectName( u"mActionShowWelcomeScreen"_s );
+  connect( actionShowWelcomeScreen, &QAction::triggered, this, [this] { mWelcomeScreen->showScene(); } );
+  mProjectMenu->insertAction( mActionNewProject, actionShowWelcomeScreen );
+  mProjectMenu->insertSeparator( mActionNewProject );
+
   // View Menu
 
   if ( layout != QDialogButtonBox::KdeLayout )
