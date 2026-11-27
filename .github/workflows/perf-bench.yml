@@ -200,15 +200,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Step-log ::error:: lines proved unreliable for this job — post the
-          # captured diagnosis straight to the check-run annotations API.
+          # captured diagnosis as check-run output summary (readable via
+          # GET /check-runs/{id} -> .output.summary) + annotations (<=240 chars).
           JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[0].id')
           CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
-          jq -Rn '[inputs | select(length>0) | {path: ".github/workflows/perf-bench.yml", start_line: 1, end_line: 1, annotation_level: "failure", message: (.[0:400])}]' \
-            perf-results/lastcmd.txt perf-results/errors.txt > /tmp/anns.json 2>/dev/null || echo "[]" > /tmp/anns.json
+          {
+            echo "=== last failing command (ERR trap) ==="
+            cat perf-results/lastcmd.txt 2>/dev/null || echo "(none)"
+            echo "=== captured error lines ==="
+            cat perf-results/errors.txt 2>/dev/null || echo "(none)"
+            echo "=== buildlog tail (last 80 lines) ==="
+            tail -n 80 perf-results/buildlog.txt 2>/dev/null || echo "(none)"
+          } > /tmp/diag.txt
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "perf-bench failure diagnosis", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json >/dev/null
+          jq -Rn '[inputs | select(length>0) | {path: ".github/workflows/perf-bench.yml", start_line: 1, end_line: 1, annotation_level: "failure", message: (.[0:240])}]' \
+            perf-results/lastcmd.txt perf-results/errors.txt > /tmp/anns.json
           gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID/annotations" --input /tmp/anns.json >/dev/null || true
-          echo "diagnosis:"
-          cat perf-results/lastcmd.txt 2>/dev/null || true
-          cat perf-results/errors.txt 2>/dev/null || true
+          echo "diagnosis posted"
 
       - name: 📊 Publish benchmark summary
         if: always()
