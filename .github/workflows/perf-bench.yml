@@ -112,13 +112,15 @@ jobs:
                 apt-get update -qq
                 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache flex bison mold
               fi
-              if command -v mold >/dev/null 2>&1; then
+              if command -v mold >/dev/null 2>&1 && false; then
                 # NOTE: mold was observed failing on ZSTD symbol ordering when
-                # linking QGIS with system Qt6 in this image (runs 45925892699
-                # annotation) — GNU ld resolves it; revisit later if needed.
-                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=default"
+                # linking QGIS with system Qt6 in this image (run 45925892699)
+                # — GNU ld resolves it. Disabled until root-caused.
+                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=mold"
               else
-                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=default"
+                # Leave USE_ALTERNATE_LINKER unset = system default linker
+                # (linker.cmake FATAL_ERRORs on any unknown value).
+                LINKER_FLAG=""
               fi
               if [ -x /usr/bin/clang ] && [ -x /usr/bin/clang++ ]; then
                 CC_FLAG="-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++"
