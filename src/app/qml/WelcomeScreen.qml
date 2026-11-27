@@ -144,6 +144,30 @@ Item {
             color: "#566775"
           }
 
+          // Always-visible entry points: open an existing project from disk
+          // (the welcome screen has no other route to the file dialog).
+          Row {
+            width: parent.width
+            spacing: 8
+
+            ActionPill {
+              label: qsTr("Open other project…")
+              primary: true
+              onActivated: {
+                welcomeScreenController.openProjectDialog();
+                welcomeScreenController.hideScene();
+              }
+            }
+
+            ActionPill {
+              label: qsTr("New blank project")
+              onActivated: {
+                welcomeScreenController.createBlankProject();
+                welcomeScreenController.hideScene();
+              }
+            }
+          }
+
           // Fast search across recent projects: type a few characters and
           // click a result to open it directly. Read-only by design: this
           // list only opens projects, all management actions stay on the
@@ -152,9 +176,7 @@ Item {
             id: projectSearchArea
             width: parent.width
             spacing: 6
-            visible: recentProjectsModel && recentProjectsModel.rowCount() > 0
-
-            property string firstMatchPath: ""
+            visible: recentProjectsModel.rowCount() > 0
 
             Rectangle {
               width: parent.width
@@ -175,8 +197,6 @@ Item {
                 background: null
                 selectByMouse: true
                 verticalAlignment: TextInput.AlignVCenter
-
-                onTextChanged: projectSearchArea.firstMatchPath = ""
 
                 Keys.onEscapePressed: {
                   projectSearchField.text = "";
@@ -217,15 +237,6 @@ Item {
                     const title = ( Title || "" ).toLowerCase();
                     const path = ( ProjectNativePath || ProjectPath || "" ).toLowerCase();
                     return title.includes( query ) || path.includes( query );
-                  }
-
-                  Component.onCompleted: {
-                    if ( isMatch && projectSearchArea.firstMatchPath === "" )
-                      projectSearchArea.firstMatchPath = ProjectPath;
-                  }
-                  onIsMatchChanged: {
-                    if ( isMatch && projectSearchArea.firstMatchPath === "" )
-                      projectSearchArea.firstMatchPath = ProjectPath;
                   }
 
                   ColumnLayout {

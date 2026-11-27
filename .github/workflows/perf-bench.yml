@@ -17,6 +17,14 @@ on:
         description: 'Synthetic point features for the benchmark dataset'
         required: false
         default: '100000'
+      compare_upstream:
+        description: 'Also build upstream qgis/QGIS master and compare on the same runner'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
       runner:
         description: 'Runner (bigger = faster but billed even on public repos)'
         required: false
@@ -39,7 +47,7 @@ jobs:
   bench:
     name: perf benchmark (linux)
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
-    timeout-minutes: 300
+    timeout-minutes: 360
 
     steps:
       - name: 🐣 Checkout
@@ -72,78 +80,102 @@ jobs:
             perfbench-ccache-
             fastbuild-ccache-fast-python-
 
-      # One pass: configure (fast + Python) -> build qgis -> run the bench.
-      - name: 🌋 Build + run benchmark
+      # One pass: build the fork, benchmark it, then (optional) build upstream
+      # qgis/QGIS master with identical flags and benchmark it too — a true
+      # A/B on the same runner, same compiler, same data, shared ccache
+      # (the reference build warms the cache; the fork build then only pays
+      # for its own deltas).
+      - name: 🌋 Build + run benchmark (fork vs upstream)
         run: |
-          docker run --rm \
-            -v $(pwd):/root/QGIS \
-            -v $(pwd)/.ccache:/root/.ccache \
-            --env-file .docker/docker-variables.env \
-            -e CCACHE_DIR=/root/.ccache \
-            "${BUILD_IMAGE}" bash -c '
+          docker run --rm             -v $(pwd):/root/QGIS             -v $(pwd)/.ccache:/root/.ccache             --env-file .docker/docker-variables.env             -e CCACHE_DIR=/root/.ccache             "${BUILD_IMAGE}" bash -c '
               set -e
               git config --global --add safe.directory /root/QGIS
-              ccache -M 1G
+              ccache -M 2G
               ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
               ccache --set-config hash_dir=false
               ccache --set-config compiler_check=content
               ccache --set-config inode_cache=true || true
               ccache -z
 
+              BUILD_FLAGS="-G Ninja -DCMAKE_BUILD_TYPE=Release                 -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++                 -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1                 -DUSE_CCACHE=ON -DUSE_ALTERNATE_LINKER=mold                 -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON                 -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON                 -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF                 -DWITH_PDAL=OFF -DWITH_EPT=OFF -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF                 -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF                 -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF                 -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF                 -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF                 -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF                 -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON"
+
+              mkdir -p /root/QGIS/perf-results
+
+              run_bench() {
+                local LABEL="$1" TREE="$2" BUILD="$3"
+                export QGIS_OUTPUT="$BUILD/output"
+                export PYTHONPATH="$QGIS_OUTPUT/python:$PYTHONPATH"
+                export LD_LIBRARY_PATH="$QGIS_OUTPUT/lib:$LD_LIBRARY_PATH"
+                export QT_QPA_PLATFORM=offscreen
+                cd "$TREE"
+                python3 scripts/perf/qgis-perf-bench.py                   --data-dir /tmp/qgis-perf-bench-data                   --features ${{ inputs.features || 100000 }}                   --repeats 5                   --json "/root/QGIS/perf-results/bench-$LABEL.json"                   --markdown "/root/QGIS/perf-results/bench-$LABEL.md"                   --label "$LABEL"
+              }
+
+              # ---- 1) the fork -------------------------------------------------
+              echo "==> Building the FORK tree"
               if [ ! -f '"${BUILD_DIR}"'/CMakeCache.txt ]; then
-                cmake -S /root/QGIS -B '"${BUILD_DIR}"' -G Ninja \
-                  -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_C_COMPILER=/usr/bin/clang \
-                  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
-                  -DCMAKE_C_FLAGS_DEBUG=-g1 \
-                  -DCMAKE_CXX_FLAGS_DEBUG=-g1 \
-                  -DUSE_CCACHE=ON \
-                  -DUSE_ALTERNATE_LINKER=mold \
-                  -DWITH_DESKTOP=ON \
-                  -DWITH_GUI=ON \
-                  -DWITH_ANALYSIS=ON \
-                  -DWITH_PYTHON=ON \
-                  -DWITH_BINDINGS=ON \
-                  -DWITH_STAGED_PLUGINS=ON \
-                  -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF \
-                  -DWITH_PDAL=OFF -DWITH_EPT=OFF -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF \
-                  -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF \
-                  -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF \
-                  -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF \
-                  -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF \
-                  -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF \
-                  -DWITH_INTERNAL_SPATIALINDEX=ON \
-                  -DENABLE_UNITY_BUILDS=ON
+                cmake -S /root/QGIS -B '"${BUILD_DIR}"' $BUILD_FLAGS
               fi
               cmake --build '"${BUILD_DIR}"' --target qgis
+              run_bench fork /root/QGIS '"${BUILD_DIR}"'
 
-              # Expose the built QGIS python modules + binaries, then run the suite
-              export QGIS_OUTPUT='"${BUILD_DIR}"'/output
-              export PYTHONPATH="$QGIS_OUTPUT/python:$PYTHONPATH"
-              export LD_LIBRARY_PATH="$QGIS_OUTPUT/lib:$LD_LIBRARY_PATH"
-              export QT_QPA_PLATFORM=offscreen
-              mkdir -p /root/QGIS/perf-results
-              cd /root/QGIS
-              python3 scripts/perf/qgis-perf-bench.py \
-                --data-dir /tmp/qgis-perf-bench-data \
-                --features ${{ inputs.features || 100000 }} \
-                --repeats 3 \
-                --json /root/QGIS/perf-results/bench.json \
-                --markdown /root/QGIS/perf-results/bench.md \
-                --label "run ${{ github.run_id }}"
-              echo done
+              # ---- 2) upstream reference (optional) -----------------------------
+              if [ "${{ inputs.compare_upstream || 'true' }}" = "true" ]; then
+                echo "==> Building upstream qgis/QGIS master (same flags, shared ccache)"
+                git clone --depth 1 https://github.com/qgis/QGIS.git /root/QGIS-ref
+                git config --global --add safe.directory /root/QGIS-ref
+                cmake -S /root/QGIS-ref -B /root/QGIS-ref/build-perf $BUILD_FLAGS
+                cmake --build /root/QGIS-ref/build-perf --target qgis
+                run_bench reference /root/QGIS-ref /root/QGIS-ref/build-perf
+                echo "==> A/B complete: fork vs reference"
+              else
+                echo "==> Upstream comparison skipped (input)"
+              fi
+
+              echo "==> ccache statistics:"
+              ccache -s | tail -6
             '
 
       - name: 📊 Publish benchmark summary
         if: always()
         run: |
           {
-            echo "## 📊 QGIS performance benchmark"
+            echo "## 📊 QGIS performance benchmark — fork vs upstream"
             echo ""
-            if [ -f perf-results/bench.md ]; then
-              cat perf-results/bench.md
+            echo "Same runner, same compiler, same deterministic dataset (seed 20261126), 5 runs per metric (median / p10 / p90)."
+            echo ""
+            echo "### Fork (this branch)"
+            echo ""
+            if [ -f perf-results/bench-fork.md ]; then
+              cat perf-results/bench-fork.md
             else
-              echo "Benchmark did not complete — check the build+run step logs."
+              echo "Fork benchmark did not complete — check the build+run logs."
+            fi
+            if [ -f perf-results/bench-reference.md ]; then
+              echo ""
+              echo "### Reference (upstream qgis/QGIS master)"
+              echo ""
+              cat perf-results/bench-reference.md
+              echo ""
+              echo "### Fork delta vs reference (median)"
+              echo ""
+              python3 - <<'PY'
+              import json, os
+              f = 'perf-results/bench-fork.json'
+              r = 'perf-results/bench-reference.json'
+              if os.path.exists(f) and os.path.exists(r):
+                  fj = {x['name']: x for x in json.load(open(f))['rows']}
+                  rj = {x['name']: x for x in json.load(open(r))['rows']}
+                  print('| Metric | Reference (s) | Fork (s) | Delta |')
+                  print('|---|---|---|---|')
+                  for k, rv in rj.items():
+                      fv = fj.get(k)
+                      if fv and rv['median_s'] and fv['median_s']:
+                          d = (fv['median_s'] - rv['median_s']) / rv['median_s'] * 100
+                          print('| %s | %.4f | %.4f | %+.1f%% |' % (k, rv['median_s'], fv['median_s'], d))
+              else:
+                  print('Comparison unavailable (reference run missing).')
+              PY
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

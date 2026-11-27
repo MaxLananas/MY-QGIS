@@ -70,11 +70,13 @@ from qgis.core import (  # noqa: E402
     QgsMapSettings,
     QgsPointXY,
     QgsProject,
+    QgsRasterLayer,
     QgsRectangle,
     QgsVectorFileWriter,
     QgsVectorLayer,
     QgsCoordinateTransformContext,
 )
+
 from qgis.PyQt.QtCore import Qgis as _UnusedQt  # noqa: F401  (ensures PyQt import path works)
 from qgis.PyQt.QtGui import QColor, QImage, QPainter  # noqa: E402
 
@@ -167,6 +169,32 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
         if err != QgsVectorFileWriter.NoError:
             raise RuntimeError("polygon export failed: %s" % err)
     info["polys"] = {"path": poly_path, "count": n_polys}
+
+    # ---------------- raster (2000x2000 float32 GeoTIFF) ---------------------
+    # Written with the GDAL python bindings (always present in a QGIS env).
+    raster_path = os.path.join(data_dir, "bench_raster.tif")
+    if not os.path.exists(raster_path):
+        try:
+            import numpy as np
+            from osgeo import gdal, osr
+        except ImportError:
+            print("  raster generation skipped: osgeo/numpy not importable")
+            info["raster"] = None
+            return info
+        gdal.UseExceptions()
+        rng2 = np.random.default_rng(20261126)
+        arr = rng2.random((2000, 2000)).astype(np.float32) * 4000.0
+        drv = gdal.GetDriverByName("GTiff")
+        ds = drv.Create(raster_path, 2000, 2000, 1, gdal.GDT_Float32,
+                        options=["COMPRESS=DEFLATE", "TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"])
+        ds.SetGeoTransform((-180.0, 360.0 / 2000.0, 0.0, 80.0, 0.0, -160.0 / 2000.0))
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(4326)
+        ds.SetProjection(srs.ExportToWkt())
+        ds.GetRasterBand(1).WriteArray(arr)
+        ds.GetRasterBand(1).SetNoDataValue(-9999.0)
+        ds = None  # flush
+    info["raster"] = {"path": raster_path, "size": "2000x2000 float32 tiled"}
     return info
 
 
@@ -194,15 +222,18 @@ class Bench:
     def table(self):
         rows = []
         for name, times in self.results.items():
-            rows.append(
-                {
-                    "name": name,
-                    "median_s": round(statistics.median(times), 4),
-                    "best_s": round(min(times), 4),
-                    "n": len(times),
-                    "note": self.notes.get(name, ""),
-                }
-            )
+            row = {
+                "name": name,
+                "median_s": round(statistics.median(times), 4),
+                "best_s": round(min(times), 4),
+                "n": len(times),
+                "note": self.notes.get(name, ""),
+            }
+            if len(times) >= 2:
+                q = statistics.quantiles(times, n=10)
+                row["p10_s"] = round(q[0], 4)
+                row["p90_s"] = round(q[8], 4)
+            rows.append(row)
         return rows
 
 
@@ -377,6 +408,42 @@ def main():
 
     bench.run("unique_values", lambda: len(pts.uniqueValues(pts.fields().lookupField("category"))))
 
+    # ---- raster engine -------------------------------------------------------
+    raster_path = os.path.join(args.data_dir, "bench_raster.tif")
+    if os.path.exists(raster_path) and os.path.getsize(raster_path) > 0:
+        rlayer = QgsRasterLayer(raster_path, "bench_raster")
+        if rlayer.isValid():
+            rfull = QgsRectangle(-180, -80, 180, 80)
+
+            def raster_blocks():
+                dp = rlayer.dataProvider()
+                total = 0
+                for by in range(0, 2000, 256):
+                    for bx in range(0, 2000, 256):
+                        w = min(256, 2000 - bx)
+                        h = min(256, 2000 - by)
+                        x0 = -180.0 + (bx / 2000.0) * 360.0
+                        x1 = -180.0 + ((bx + w) / 2000.0) * 360.0
+                        y1 = 80.0 - (by / 2000.0) * 160.0
+                        y0 = 80.0 - ((by + h) / 2000.0) * 160.0
+                        blk = dp.block(1, QgsRectangle(x0, y0, x1, y1), w, h)
+                        total += 1 if blk else 0
+                return total
+            bench.run("raster_blocks_64", raster_blocks,
+                      note="64 blocks of 256x256 from 2000x2000 GeoTIFF")
+
+            def raster_render():
+                s = QgsMapSettings()
+                s.setLayers([rlayer])
+                s.setExtent(rfull)
+                s.setOutputSize(QImage(1600, 1200, QImage.Format_RGB32).size())
+                s.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
+                do_render(s)
+            bench.run("raster_render_full", raster_render,
+                      note="full render of the 2000x2000 GeoTIFF")
+        else:
+            print("  raster benchmarks skipped: invalid raster layer")
+
     # ---- optional: processing ----------------------------------------------
     try:
         import processing  # noqa
@@ -421,10 +488,11 @@ def main():
     if args.markdown:
         with open(args.markdown, "w") as f:
             f.write("# QGIS performance benchmark%s\n\n" % (" — " + args.label if args.label else ""))
-            f.write("| Metric | Median (s) | Best (s) | n | Note |\n|---|---|---|---|---|\n")
+            f.write("| Metric | Median (s) | p10 (s) | p90 (s) | Best (s) | n | Note |\n|---|---|---|---|---|---|---|\n")
             for r in rows:
-                f.write("| %s | %s | %s | %d | %s |\n" % (
-                    r["name"], r["median_s"], r["best_s"], r["n"], r["note"]))
+                f.write("| %s | %s | %s | %s | %s | %d | %s |\n" % (
+                    r["name"], r["median_s"], r.get("p10_s", "-"), r.get("p90_s", "-"),
+                    r["best_s"], r["n"], r["note"]))
             f.write("\nEnvironment: QGIS %s, Qt %s, Python %s, cores %s, %d pts / %d polys\n"
                     % (env["qgis"], env["qt"], env["python"], env["cores"], env["features"], env["polys"]))
             f.write("\n> Synthetic deterministic data (seed 20261126). Real QGIS timings,\n"

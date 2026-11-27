@@ -40,6 +40,8 @@ class QgsWelcomeScreenController : public QObject
 
     Q_INVOKABLE void openProject( const QString &path );
 
+    Q_INVOKABLE void openProjectDialog();
+
     Q_INVOKABLE void createBlankProject();
     Q_INVOKABLE void createProjectFromBasemap();
     Q_INVOKABLE void createProjectFromTemplate( const QString &path );
