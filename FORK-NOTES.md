@@ -203,7 +203,24 @@ publics.
 (`UNITY_BUILD_BATCH_SIZE`, presets), dépôt mold (performance de link),
 documentation GitHub Actions (runners et facturation).
 
-## 3. Thèmes « Aurora » (interface moderne)
+## 3. Performance des opérations QGIS : benchmarks réels & audit
+
+- **`ARCHITECTURE-AUDIT.md`** : audit détaillé des chemins chauds
+  (constats sourcés fichier:ligne, feuille de route R1–R5 avec prérequis de
+  validation). Conclusion honnête : le cœur amont est déjà très optimisé ;
+  le fork refuse tout patch aveugle sans build + tests.
+- **`BENCHMARKS.md`** : protocole de mesure (démarrage, rendu, pan/zoom,
+  table attributaire, expressions, transformations, processing, RAM) avec
+  règles d'honnêteté strictes (données synthétiques déterministes = suivi
+  de régression, jamais des chiffres marketing).
+- **`scripts/perf/qgis-perf-bench.py`** : suite PyQGIS complète, exécutable
+  localement ou via le workflow manuel **📊 Performance benchmark**
+  (`.github/workflows/perf-bench.yml`) qui construit réellement QGIS et
+  publie le tableau de timings dans le résumé du run.
+- Défaut de fork : cache d'images à 256 Mo (`cache/max-image-size`) —
+  documenté et réversible.
+
+## 4. Thèmes « Aurora » (interface moderne)
 
 Deux nouveaux thèmes installés dans `resources/themes/` :
 
@@ -220,7 +237,7 @@ les personnes qui n'avaient jamais choisi de thème ; les choix existants
 (`UI/UITheme`) sont conservés. Changement de thème à tout moment :
 *Préférences ▸ Général ▸ Thème* (redémarrage nécessaire).
 
-## 4. Écran d'accueil : prise en main
+## 5. Écran d'accueil : prise en main
 
 - Nouvel onglet **« Learn »** : parcours « Démarrez en cinq minutes »
   (créer un projet, ajouter des données, styliser, sauvegarder) avec boutons
@@ -234,7 +251,7 @@ les personnes qui n'avaient jamais choisi de thème ; les choix existants
 - Nouvelle action **Projet ▸ Welcome Screen** pour rouvrir l'écran d'accueil
   à tout moment depuis la fenêtre principale.
 
-## 5. Politique IA du projet amont
+## 6. Politique IA du projet amont
 
 Le dépôt amont QGIS interdit les contributions assistées par IA (voir
 `AGENTS.md` et la QEP-408). Ces modifications vivent uniquement dans ce fork :
