@@ -178,13 +178,17 @@ jobs:
               ccache -s | tail -6
             ' > perf-results/buildlog.txt 2>&1 || {
               grep -E "CMake Error|Could ?NOT find|Could not find|Configuring incomplete|ninja: error|error:" perf-results/buildlog.txt 2>/dev/null | grep -v "^CMake Error at /usr/share/cmake" | tail -10 > perf-results/errors.txt
+              if [ ! -s perf-results/errors.txt ]; then
+                # No recognisable error text (e.g. OOM-killed compile): fall
+                # back to the raw tail so the annotations still show something.
+                tail -n 15 perf-results/buildlog.txt 2>/dev/null > perf-results/errors.txt
+              fi
               {
                 echo "### 🔥 Build/bench failure diagnosis"
                 echo ""
                 echo '```'
                 cat perf-results/lastcmd.txt 2>/dev/null || true
                 cat perf-results/errors.txt 2>/dev/null || true
-                tail -c 1500 perf-results/buildlog.txt 2>/dev/null || true
                 echo '```'
               } >> "$GITHUB_STEP_SUMMARY"
               { cat perf-results/lastcmd.txt 2>/dev/null; cat perf-results/errors.txt 2>/dev/null; } | while IFS= read -r line; do echo "::error::${line:0:500}"; done
