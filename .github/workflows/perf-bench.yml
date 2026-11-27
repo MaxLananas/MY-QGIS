@@ -148,6 +148,9 @@ jobs:
 
               run_bench() {
                 local LABEL="$1" TREE="$2" BUILD="$3"
+                # PyQGIS staging lives in $BUILD/output/python; UTF-8 locale
+                # required by Qt/QGIS python (C/ANSI_X3.4 warns otherwise).
+                export LANG=C.UTF-8 LC_ALL=C.UTF-8
                 export QGIS_OUTPUT="$BUILD/output"
                 export PYTHONPATH="$QGIS_OUTPUT/python:$PYTHONPATH"
                 export LD_LIBRARY_PATH="$QGIS_OUTPUT/lib:$LD_LIBRARY_PATH"
@@ -161,7 +164,11 @@ jobs:
               if [ ! -f '"${BUILD_DIR}"'/CMakeCache.txt ]; then
                 cmake -S /root/QGIS -B '"${BUILD_DIR}"' $BUILD_FLAGS
               fi
-              cmake --build '"${BUILD_DIR}"' --target qgis
+              # Default (ALL) target: also builds the PyQGIS sip bindings
+              # (pycore/pygui/pyanalysis) and stages plugins into output/.
+              # `--target qgis` alone stops before the bindings, and the bench
+              # dies on "No module named qgis._core" (run 45984981383).
+              cmake --build '"${BUILD_DIR}"'
               run_bench fork /root/QGIS '"${BUILD_DIR}"'
 
               # ---- 2) upstream reference (optional) -----------------------------
@@ -170,7 +177,7 @@ jobs:
                 git clone --depth 1 https://github.com/qgis/QGIS.git /root/QGIS-ref
                 git config --global --add safe.directory /root/QGIS-ref
                 cmake -S /root/QGIS-ref -B /root/QGIS-ref/build-perf $BUILD_FLAGS
-                cmake --build /root/QGIS-ref/build-perf --target qgis
+                cmake --build /root/QGIS-ref/build-perf
                 run_bench reference /root/QGIS-ref /root/QGIS-ref/build-perf
                 echo "==> A/B complete: fork vs reference"
               else
