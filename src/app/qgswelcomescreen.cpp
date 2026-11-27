@@ -55,10 +55,7 @@ void QgsWelcomeScreenController::openProjectDialog()
 {
   // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
   // (and to let the welcome screen hide before the modal dialog opens)
-  QTimer::singleShot( 1, this, []()
-  {
-    QMetaObject::invokeMethod( QgisApp::instance(), "fileOpen" );
-  } );
+  QTimer::singleShot( 1, this, []() { QMetaObject::invokeMethod( QgisApp::instance(), "fileOpen" ); } );
 }
 
 void QgsWelcomeScreenController::createBlankProject()
