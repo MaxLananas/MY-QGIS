@@ -164,7 +164,7 @@ jobs:
               echo "==> ccache statistics:"
               ccache -s | tail -6
             ' > perf-results/buildlog.txt 2>&1 || {
-              grep -E "CMake Error|CMake Warning|Configuring incomplete|ninja: error|error:" perf-results/buildlog.txt 2>/dev/null | tail -8 > perf-results/errors.txt
+              grep -E "CMake Error|Could ?NOT find|Could not find|Configuring incomplete|ninja: error|error:" perf-results/buildlog.txt 2>/dev/null | grep -v "^CMake Error at /usr/share/cmake" | tail -10 > perf-results/errors.txt
               {
                 echo "### 🔥 Build/bench failure diagnosis"
                 echo ""
