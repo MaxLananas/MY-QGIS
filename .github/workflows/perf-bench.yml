@@ -99,6 +99,26 @@ jobs:
               set -e
               trap "printf \"FAILED rc=%s cmd=%s\n\" \"\$?\" \"\$BASH_COMMAND\" > /root/QGIS/perf-results/lastcmd.txt" ERR
               git config --global --add safe.directory /root/QGIS
+
+              # Preflight: the bin-only image ships clang/mold/ninja but not
+              # ccache; install it on the fly and pick compilers/linker that
+              # actually exist. Both A/B sides use the SAME resolved flags.
+              if ! command -v ccache >/dev/null 2>&1; then
+                apt-get update -qq
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache
+              fi
+              if command -v mold >/dev/null 2>&1; then
+                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=mold"
+              else
+                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=default"
+              fi
+              if [ -x /usr/bin/clang ] && [ -x /usr/bin/clang++ ]; then
+                CC_FLAG="-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++"
+              else
+                CC_FLAG="-DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++"
+              fi
+              echo "==> Toolchain: $(clang --version 2>/dev/null | head -1 || gcc --version | head -1) / linker_flag=$LINKER_FLAG"
+
               ccache -M 2G
               ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
               ccache --set-config hash_dir=false
@@ -106,7 +126,7 @@ jobs:
               ccache --set-config inode_cache=true || true
               ccache -z
 
-              BUILD_FLAGS="-G Ninja -DCMAKE_BUILD_TYPE=Release                 -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++                 -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1                 -DUSE_CCACHE=ON -DUSE_ALTERNATE_LINKER=mold                 -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON                 -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON                 -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF                 -DWITH_PDAL=OFF -DWITH_EPT=OFF -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF                 -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF                 -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF                 -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF                 -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF                 -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF                 -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON"
+              BUILD_FLAGS="-G Ninja -DCMAKE_BUILD_TYPE=Release                 -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1                 -DUSE_CCACHE=ON                 -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON                 -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON                 -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF                 -DWITH_PDAL=OFF -DWITH_EPT=OFF -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF                 -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF                 -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF                 -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF                 -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF                 -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF                 -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON $CC_FLAG $LINKER_FLAG"
 
               mkdir -p /root/QGIS/perf-results
 
