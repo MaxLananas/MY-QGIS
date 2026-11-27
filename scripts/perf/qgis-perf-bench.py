@@ -77,15 +77,16 @@ from qgis.core import (  # noqa: E402
     QgsVectorFileWriter,
     QgsVectorLayer,
 )
+from qgis.PyQt.QtCore import QMetaType  # noqa: E402
 from qgis.PyQt.QtGui import QColor, QImage, QPainter  # noqa: E402
 
 FIELDS = [
-    ("name", "string", 24),
-    ("category", "string", 12),
-    ("value", "double"),
-    ("count", "integer"),
-    ("code", "integer"),
-    ("label", "string", 16),
+    ("name", QMetaType.Type.QString, 24),
+    ("category", QMetaType.Type.QString, 12),
+    ("value", QMetaType.Type.Double, 0),
+    ("count", QMetaType.Type.Int, 0),
+    ("code", QMetaType.Type.Int, 0),
+    ("label", QMetaType.Type.QString, 16),
 ]
 CATEGORIES = ["alpha", "beta", "gamma", "delta"]
 
@@ -101,7 +102,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
     if not os.path.exists(pts_path):
         layer = QgsVectorLayer("Point?crs=EPSG:4326", "bench_points_src", "memory")
         pr = layer.dataProvider()
-        pr.addAttributes([QgsField(f, t) for f, t, *_ in FIELDS])
+        pr.addAttributes([QgsField(f, t, "", ln) for f, t, ln in FIELDS])
         layer.updateFields()
         feats = []
         for i in range(n_points):
@@ -129,7 +130,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
             QgsVectorFileWriter.SaveVectorOptions(),
         )
         err = res[0] if isinstance(res, tuple) else res
-        if err != QgsVectorFileWriter.NoError:
+        if err != QgsVectorFileWriter.WriterError.NoError:
             raise RuntimeError("point export failed: %s" % err)
     info["points"] = {"path": pts_path, "count": n_points}
 
@@ -138,7 +139,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
     if not os.path.exists(poly_path):
         layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "bench_polys_src", "memory")
         pr = layer.dataProvider()
-        pr.addAttributes([QgsField(f, t) for f, t, *_ in FIELDS[:4]])
+        pr.addAttributes([QgsField(f, t, "", ln) for f, t, ln in FIELDS[:4]])
         layer.updateFields()
         feats = []
         for i in range(n_polys):
@@ -165,7 +166,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
             QgsVectorFileWriter.SaveVectorOptions(),
         )
         err = res[0] if isinstance(res, tuple) else res
-        if err != QgsVectorFileWriter.NoError:
+        if err != QgsVectorFileWriter.WriterError.NoError:
             raise RuntimeError("polygon export failed: %s" % err)
     info["polys"] = {"path": poly_path, "count": n_polys}
 
