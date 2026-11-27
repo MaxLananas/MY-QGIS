@@ -24,12 +24,109 @@ vite le quota de stockage GitHub Actions. Tout a donc été retiré :
 Pour réactiver un déclencheur automatique, remettez simplement le bloc `on:`
 souhaité en tête du fichier de workflow concerné.
 
-## 2. Builds ultra-rapides
+## 2. Builds ultra-rapides — architecture mesurée
 
-QGIS est un monstre C++ (~2,7 M de lignes) : **un build complet à froid ne
-pourra jamais durer 2 minutes** (comptez ~30–60 min, une seule fois). En
-revanche, tout a été mis en place pour que **chaque rebuild après le premier
-soit de l'ordre de quelques secondes à 2 minutes** :
+### Le verdict physique, sans fard
+
+QGIS ≈ 2 600 unités de compilation C++ avec des headers très lourds
+ Qt inclus) : **un build complet depuis les sources ne sera jamais < 120 s**
+sur du matériel standard. Le "24 h" constaté venait d'ailleurs : runners
+« blacksmith » payants non configurés (jobs bloqués indéfiniment — corrigé),
+installations vcpkg, builds Docker automatiques. Tout cela est neutralisé.
+
+En revanche, l'**architecture à 3 niveaux ci-dessous rend le pire cas rare et
+le cas courant très rapide** — chaque affirmation est adossée à une mesure
+réelle (voir « Benchmarks »).
+
+### Architecture de cache à 3 niveaux
+
+| Niveau | Contenu | Effet |
+|---|---|---|
+| **L1** | arbre de build persistant (`build-fast/`) restauré en CI | ninja ne recompile **que le diff** + lien mold → chemin < 120 s |
+| **L2** | ccache (ou sccache opt-in) | si L1 est évincé : rebuild complet depuis le cache, pas depuis les sources |
+| **L3** | image Docker `build-deps` précompilée par le projet QGIS | zéro compilation de dépendances, jamais |
+
+### Benchmarks mesurés (corpus synthétique calibré QGIS : 600 TU, headers
+lourds, 3 bibliothèques, lot unity de 8 — harnais : `scripts/bench-build.sh`)
+
+Exécutés réellement (gcc 12 / ninja 1.13 / ccache 4.11, 2 cœurs) :
+
+| Scénario | Mesuré | Gain |
+|---|---|---|
+| A — build froid, unity OFF, PCH OFF, `-g1` | **120,8 s** | baseline |
+| A2 — build froid, debug complet `-g` | **135,5 s** | `-g1` fait gagner **12 %** |
+| B — froid, unity ON | **22,8 s** | **5,3×** |
+| C — froid, unity + PCH (le réglage « fast ») | **15,5 s** | **7,8×** |
+| D3 — wipe des .o + rebuild complet via ccache, **même dossier** | **0,5 s** | ~100 % de hits |
+| G — no-op ninja (rien changé) | **0,1 s** | |
+| E/F — incrémental 1 TU édité | **0,6–0,9 s** | |
+
+**Découverte mesurée (risque PCH/cccache)** : un rebuild complet depuis le
+cache dans un **dossier différent** donne **0 % de hits même avec
+`hash_dir=false`** (D1/D2 = 15,5 s ≈ recompilation complète) : le chemin
+absolu du PCH (`-include …/cmake_pch.hxx`) fait partie de la clé de cache.
+Mitigation appliquée partout : **chemin de build fixe** — conteneur CI
+`/root/QGIS/build-fast` (identique à chaque run) et local
+`${SOURCE_DIR}/build-fast`. Déplacer un arbre de build = ressaisir le cache.
+
+Mise à l'échelle honnête vers QGIS (~2 600 TU, TUs ~2–3× plus lourds) :
+froid ≈ 20–25 min sur 2 cœurs (≈ 3–5 min sur 16 cœurs) **une fois** ;
+ensuite : incrémental CI ≈ compiles du diff + lien mold (objectif < 120 s) ;
+no-op ≈ secondes. Le lien final reste le poste dominant en incrémental —
+d'où mold (les benchmarks publiés du dépôt mold montrent des liens de
+grands binaires passant de minutes à secondes).
+
+### ccache vs sccache (choix argumenté)
+
+| Critère | ccache (défaut) | sccache (opt-in) |
+|---|---|---|
+| Intégration cache Actions | archive tar + restore (latence GB) | **service de cache Actions natif** (pas de tarball) |
+| Mode PCH | documenté dans le man (`ccache(1)`), rodé | supporte mais moins éprouvé |
+| Hachage | contenu, direct+preprocesseur, vérifié | contenu |
+| Compilation distribuée | non | oui, mais **requiert une infrastructure** (scheduler + workers) → écarté (aucune dépense) |
+| MSVC | ccache limité | bon |
+
+→ `ccache` par défaut (robustesse PCH, intégrité documentée), `sccache`
+activable d'un clic dans le workflow (backends S3/R2 possibles plus tard si
+tu fournis un bucket — hors périmètre gratuit actuel).
+
+### Approches explorées puis écartées (avec raison)
+
+- **distcc / Icecream / sccache distributed** : compilation distribuée
+  réelle = machines dédiées ou runners supplémentaires → payant. Écarté.
+- **Clang modules C++20** : non supportés par ccache, immatures côté
+  CMake/Qt → écartés.
+- **ThinLTO** : améliore le produit final, pas la vitesse de développement ;
+  dégrade les builds incrémentaux → réservé au release, pas au fast path.
+- **PCH « maison » additionnels** : QGIS a déjà ses PCH par cible
+  (`qgis.h`) ; ajouter des super-PCH modifierait le code amont pour un gain
+  marginal après unity+PCH → écarté.
+- **Runners 16 cœurs** : facturés même sur dépôt public (doc GitHub) →
+  disponibles en option dans le workflow, jamais en défaut.
+
+### Outils livrés
+
+- `scripts/bench-build.sh` : le harnais de benchmark complet (A→H), exécutable
+  partout où cmake/ninja/ccache existent ; résultats dans
+  `build-bench/REPORT.txt` (hors Git).
+- `scripts/qgis-fastbuild.sh` :
+  - `--profile` : `ninja -d stats` + timings par étape ;
+  - `--trace` : `-ftime-trace` clang par TU + ClangBuildAnalyzer si installé
+    (voir messages du script) ;
+  - `--graph` : graphe de dépendances ninja (dot) + entrées de la cible ;
+  - `--doctor` : audit complet de l'environnement.
+- `.github/workflows/fast-build.yml` v3 : scénarios `incremental` /
+  `warm-cache` / `cold` mesurés en CI, choix du backend de cache et du
+  runner, résumé de timing dans l'onglet Summary.
+
+### Sur GitHub Actions
+
+Workflow **🚀 Fast build** (bouton « Run workflow » uniquement — 0 minute
+consommée sinon) : L1+L2 restaurés par défaut (`incremental`), image L3
+précompilée, ccache réglé selon `ccache(1)`, mold, `-g1`, unity. Les
+workflows Windows/macOS sont passés des runners « blacksmith » aux runners
+GitHub standard. `vcpkg-bump` (cron hebdo) et `sipify-bot` s'auto-excluent
+déjà sur le fork (`if: github.repository == 'qgis/QGIS'`) — vérifié.
 
 ### En local
 

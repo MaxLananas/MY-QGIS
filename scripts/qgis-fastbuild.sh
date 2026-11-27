@@ -30,7 +30,11 @@
 #   scripts/qgis-fastbuild.sh --target qgis_gui
 #   scripts/qgis-fastbuild.sh --doctor            # environment health check
 #   scripts/qgis-fastbuild.sh --clean             # wipe build dir, start over
-#   QGIS_FAST_PRESET=fast-release scripts/qgis-fastbuild.sh   # env-var style
+#   scripts/qgis-fastbuild.sh --profile           # ninja -d stats + timing per-target
+#   scripts/qgis-fastbuild.sh --trace             # clang -ftime-trace per-TU profiles
+#                                                 # (+ ClangBuildAnalyzer if installed)
+#   scripts/qgis-fastbuild.sh --graph             # dump the ninja dependency graph
+#   QGIS_FAST_PRESET=fast-release  scripts/qgis-fastbuild.sh   # env-var style
 
 set -euo pipefail
 
@@ -50,6 +54,9 @@ while [[ $# -gt 0 ]]; do
     --target)  TARGET="$2"; shift 2 ;;
     --doctor)  DOCTOR=1; shift ;;
     --clean)   CLEAN=1; shift ;;
+    --profile) PROFILE=1; shift ;;
+    --trace)   TRACE=1; shift ;;
+    --graph)   GRAPH=1; shift ;;
     --help|-h) usage ;;
     -*)        echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
     *)         TARGET="$1"; shift ;;   # positional target
@@ -137,10 +144,54 @@ if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
 fi
 
 # --------------------------------------------------------------- build ------
+# --graph: dump the ninja dependency graph (dot format) and edge counts, then exit.
+if [[ "${GRAPH:-0}" == "1" ]]; then
+  [[ -f "${BUILD_DIR}/build.ninja" ]] || { echo "No configured build at ${BUILD_DIR} yet." >&2; exit 1; }
+  OUT="${SOURCE_DIR}/build-graph"
+  mkdir -p "$OUT"
+  ninja -C "${BUILD_DIR}" -t graph > "${OUT}/graph.dot"
+  ninja -C "${BUILD_DIR}" -t inputs "${TARGET}" 2>/dev/null | sort -u > "${OUT}/${TARGET}.inputs.txt" || true
+  echo "==> Ninja graph : ${OUT}/graph.dot (render with: dot -Tsvg ${OUT}/graph.dot -o graph.svg)"
+  echo "==> '${TARGET}' inputs: ${OUT}/${TARGET}.inputs.txt ($(wc -l < "${OUT}/${TARGET}.inputs.txt" 2>/dev/null) files)"
+  echo "==> Inspect one file's edges with: ninja -C ${BUILD_DIR} -t query <file>"
+  exit 0
+fi
+
+# --trace: configure with clang -ftime-trace so every TU emits a chrome-trace
+# profile (build/*.json), then build and optionally run ClangBuildAnalyzer.
+# Answers: which headers/TUs dominate compile time? (works with clang only)
+if [[ "${TRACE:-0}" == "1" ]]; then
+  rm -rf "${BUILD_DIR}-trace"
+  cmake --preset "${PRESET}" -B "${BUILD_DIR}-trace" \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+    -DCMAKE_CXX_FLAGS_DEBUG="-g1 -ftime-trace" \
+    -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-g1 -O2 -ftime-trace" \
+    -DCMAKE_C_FLAGS_DEBUG="-g1 -ftime-trace"
+  cmake --build "${BUILD_DIR}-trace" --target "${TARGET}"
+  echo "==> Per-TU chrome traces written under ${BUILD_DIR}-trace (**.json)."
+  echo "==> Open one in chrome://tracing or https://ui.perfetto.dev"
+  if command -v ClangBuildAnalyzer >/dev/null 2>&1; then
+    echo "==> Running ClangBuildAnalyzer over the trace build..."
+    ClangBuildAnalyzer --all "${BUILD_DIR}-trace" "${OUT:-/tmp}/cba.bin" >/dev/null 2>&1 || ClangBuildAnalyzer --all "${BUILD_DIR}-trace" /tmp/cba.bin
+    ClangBuildAnalyzer --analyze /tmp/cba.bin | sed -n '1,80p'
+  else
+    echo "==> Install ClangBuildAnalyzer for an aggregate header/time report:"
+    echo "    git clone --depth 1 https://github.com/aras-p/ClangBuildAnalyzer && cd ClangBuildAnalyzer && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build && cp build/ClangBuildAnalyzer /usr/local/bin"
+  fi
+  exit 0
+fi
+
 export NINJA_STATUS="[%f/%t %es] "
 echo "==> Building target '${TARGET}' (preset '${PRESET}')..."
 START=$SECONDS
-cmake --build "${BUILD_DIR}" --target "${TARGET}"
+if [[ "${PROFILE:-0}" == "1" ]]; then
+  # ninja -d stats prints per-stage timing (scheduling, execution, edges).
+  cmake --build "${BUILD_DIR}" --target "${TARGET}" -- -d stats 2>&1 | tee "${SOURCE_DIR}/build-ninja-stats.txt"
+  echo "==> Ninja stats saved to build-ninja-stats.txt"
+  echo "==> Slowest edges: ninja -C ${BUILD_DIR} -d \"speed\" | head"
+else
+  cmake --build "${BUILD_DIR}" --target "${TARGET}"
+fi
 ELAPSED=$(( SECONDS - START ))
 echo "==> Build finished in ${ELAPSED}s"
 
