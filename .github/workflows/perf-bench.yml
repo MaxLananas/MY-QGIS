@@ -113,7 +113,10 @@ jobs:
                 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache flex bison mold
               fi
               if command -v mold >/dev/null 2>&1; then
-                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=mold"
+                # NOTE: mold was observed failing on ZSTD symbol ordering when
+                # linking QGIS with system Qt6 in this image (runs 45925892699
+                # annotation) — GNU ld resolves it; revisit later if needed.
+                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=default"
               else
                 LINKER_FLAG="-DUSE_ALTERNATE_LINKER=default"
               fi
@@ -131,7 +134,10 @@ jobs:
               ccache --set-config inode_cache=true || true
               ccache -z
 
-              BUILD_FLAGS="-G Ninja -DCMAKE_BUILD_TYPE=Release                 -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1                 -DUSE_CCACHE=ON                 -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON                 -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON                 -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF                 -DWITH_PDAL=OFF -DWITH_EPT=OFF -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF                 -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF                 -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF                 -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF                 -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF                 -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF                 -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON $CC_FLAG $LINKER_FLAG"
+              # WITH_EPT=ON is required: the EPT=OFF combination leaves
+              # QgsEptPointCloudIndex undefined at link time (run 45925892699) —
+              # upstream CI never exercises EPT=OFF.
+              BUILD_FLAGS="-G Ninja -DCMAKE_BUILD_TYPE=Release                 -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1                 -DUSE_CCACHE=ON                 -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON                 -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON                 -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF                 -DWITH_PDAL=OFF -DWITH_EPT=ON -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF                 -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF                 -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF                 -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF                 -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF                 -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF                 -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON $CC_FLAG $LINKER_FLAG"
 
               mkdir -p /root/QGIS/perf-results
 
