@@ -47,6 +47,9 @@ on:
 
 permissions:
   contents: read
+  # failure diagnosis is written back to the check-run (output summary +
+  # annotations) so it is readable via the REST API from anywhere.
+  checks: write
 
 env:
   # The FULL build-deps image (the binary-only Docker Hub target stops before
