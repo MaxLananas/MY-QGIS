@@ -164,13 +164,17 @@ jobs:
               echo "==> ccache statistics:"
               ccache -s | tail -6
             ' > perf-results/buildlog.txt 2>&1 || {
-              echo "### 🔥 Build/bench failure diagnosis" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-              cat perf-results/lastcmd.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(no in-container failure capture)" >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-              tail -c 4000 perf-results/buildlog.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY"
-              { cat perf-results/lastcmd.txt 2>/dev/null; tail -c 2000 perf-results/buildlog.txt 2>/dev/null; } | while IFS= read -r line; do echo "::error::${line:0:500}"; done
+              grep -E "CMake Error|CMake Warning|Configuring incomplete|ninja: error|error:" perf-results/buildlog.txt 2>/dev/null | tail -8 > perf-results/errors.txt
+              {
+                echo "### 🔥 Build/bench failure diagnosis"
+                echo ""
+                echo '```'
+                cat perf-results/lastcmd.txt 2>/dev/null || true
+                cat perf-results/errors.txt 2>/dev/null || true
+                tail -c 1500 perf-results/buildlog.txt 2>/dev/null || true
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              { cat perf-results/lastcmd.txt 2>/dev/null; cat perf-results/errors.txt 2>/dev/null; } | while IFS= read -r line; do echo "::error::${line:0:500}"; done
               exit 1
             }
 
