@@ -143,6 +143,130 @@ Item {
             height: 1
             color: "#566775"
           }
+
+          // Fast search across recent projects: type a few characters and
+          // click a result to open it directly. Read-only by design: this
+          // list only opens projects, all management actions stay on the
+          // project cards (their menus are index-mapped to the model).
+          Column {
+            id: projectSearchArea
+            width: parent.width
+            spacing: 6
+            visible: recentProjectsModel && recentProjectsModel.rowCount() > 0
+
+            property string firstMatchPath: ""
+
+            Rectangle {
+              width: parent.width
+              height: 34 * layoutSizeFactor
+              radius: 6
+              color: "#16334a"
+              border.width: 1
+              border.color: projectSearchField.activeFocus ? "#93b023" : "#566775"
+
+              TextField {
+                id: projectSearchField
+                anchors.fill: parent
+                anchors.margins: 6
+                color: "#e0e9ed"
+                placeholderText: qsTr("Search recent projects…")
+                placeholderTextColor: "#7d93a6"
+                font.pointSize: smallFontSize
+                background: null
+                selectByMouse: true
+                verticalAlignment: TextInput.AlignVCenter
+
+                onTextChanged: projectSearchArea.firstMatchPath = ""
+
+                Keys.onEscapePressed: {
+                  projectSearchField.text = "";
+                  projectSearchField.focus = false;
+                }
+              }
+            }
+
+            Rectangle {
+              width: parent.width
+              height: projectSearchField.text.length > 1 ? Math.min( matchesColumn.childrenRect.height + 16, 220 * layoutSizeFactor ) : 0
+              visible: height > 0
+              radius: 6
+              color: "#122a3c"
+              border.width: 1
+              border.color: "#566775"
+              clip: true
+
+              ListView {
+                id: matchesList
+                anchors.fill: parent
+                anchors.margins: 8
+                interactive: height >= 220 * layoutSizeFactor
+                clip: true
+                model: recentProjectsModel
+
+                delegate: Rectangle {
+                  width: matchesList.width
+                  height: isMatch && projectSearchField.text.length > 1 ? 40 * layoutSizeFactor : 0
+                  visible: height > 0
+                  radius: 4
+                  color: matchMouse.containsMouse ? "#1e4563" : "transparent"
+
+                  readonly property bool isMatch: {
+                    const query = projectSearchField.text.toLowerCase();
+                    if ( query.length <= 1 )
+                      return false;
+                    const title = ( Title || "" ).toLowerCase();
+                    const path = ( ProjectNativePath || ProjectPath || "" ).toLowerCase();
+                    return title.includes( query ) || path.includes( query );
+                  }
+
+                  Component.onCompleted: {
+                    if ( isMatch && projectSearchArea.firstMatchPath === "" )
+                      projectSearchArea.firstMatchPath = ProjectPath;
+                  }
+                  onIsMatchChanged: {
+                    if ( isMatch && projectSearchArea.firstMatchPath === "" )
+                      projectSearchArea.firstMatchPath = ProjectPath;
+                  }
+
+                  ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    spacing: 1
+
+                    Text {
+                      text: Title || ""
+                      font.pointSize: smallFontSize
+                      font.bold: true
+                      color: Exists ? "#e0e9ed" : "#7d93a6"
+                      elide: Text.ElideRight
+                      Layout.fillWidth: true
+                    }
+
+                    Text {
+                      text: ( ProjectNativePath || ProjectPath || "" ).replace( /([\\\/])/g, "$1\u200b" )
+                      font.pointSize: tinyFontSize
+                      color: "#7d93a6"
+                      elide: Text.ElideMiddle
+                      Layout.fillWidth: true
+                    }
+                  }
+
+                  MouseArea {
+                    id: matchMouse
+                    anchors.fill: parent
+                    cursorShape: Exists ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                    hoverEnabled: true
+                    onClicked: {
+                      if ( !Exists )
+                        return;
+                      welcomeScreenController.openProject( ProjectPath );
+                      welcomeScreenController.hideScene();
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
 
 

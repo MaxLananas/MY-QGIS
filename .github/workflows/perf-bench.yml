@@ -1,0 +1,155 @@
+name: 📊 Performance benchmark
+
+# NOTE (fork): builds QGIS with the minimal fast configuration (WITH_PYTHON=ON
+# so PyQGIS is available), then runs the real PyQGIS benchmark suite
+# (scripts/perf/qgis-perf-bench.py) headlessly inside the QGIS build-deps
+# Docker image and publishes the full timing table to the run summary.
+# Manual only — never runs automatically, costs nothing unless clicked.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      features:
+        description: 'Synthetic point features for the benchmark dataset'
+        required: false
+        default: '100000'
+      runner:
+        description: 'Runner (bigger = faster but billed even on public repos)'
+        required: false
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-4-cores
+          - ubuntu-latest-8-cores
+          - ubuntu-latest-16-cores
+
+permissions:
+  contents: read
+
+env:
+  BUILD_IMAGE: qgis/qgis3-ubuntu-qt6-build-deps-bin-only:master
+  BUILD_DIR: /root/QGIS/build-perf
+
+jobs:
+  bench:
+    name: perf benchmark (linux)
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    timeout-minutes: 300
+
+    steps:
+      - name: 🐣 Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 🧹 Reclaim disk space
+        run: |
+          df . -h
+          sudo rm -rf /usr/local/lib/android/ || true
+          df . -h
+
+      - name: 🐳 Pull the prebuilt QGIS build-deps image (local-build fallback)
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Prebuilt image pull failed — building the image locally (one-time slow path)."
+            docker build --target binary-only \
+              -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile \
+              -t "${BUILD_IMAGE}" .
+          }
+
+      - name: 💾 Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: perfbench-ccache-${{ github.run_id }}
+          restore-keys: |
+            perfbench-ccache-
+            fastbuild-ccache-fast-python-
+
+      # One pass: configure (fast + Python) -> build qgis -> run the bench.
+      - name: 🌋 Build + run benchmark
+        run: |
+          docker run --rm \
+            -v $(pwd):/root/QGIS \
+            -v $(pwd)/.ccache:/root/.ccache \
+            --env-file .docker/docker-variables.env \
+            -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -e
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 1G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              ccache --set-config inode_cache=true || true
+              ccache -z
+
+              if [ ! -f '"${BUILD_DIR}"'/CMakeCache.txt ]; then
+                cmake -S /root/QGIS -B '"${BUILD_DIR}"' -G Ninja \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_C_COMPILER=/usr/bin/clang \
+                  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+                  -DCMAKE_C_FLAGS_DEBUG=-g1 \
+                  -DCMAKE_CXX_FLAGS_DEBUG=-g1 \
+                  -DUSE_CCACHE=ON \
+                  -DUSE_ALTERNATE_LINKER=mold \
+                  -DWITH_DESKTOP=ON \
+                  -DWITH_GUI=ON \
+                  -DWITH_ANALYSIS=ON \
+                  -DWITH_PYTHON=ON \
+                  -DWITH_BINDINGS=ON \
+                  -DWITH_STAGED_PLUGINS=ON \
+                  -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF \
+                  -DWITH_PDAL=OFF -DWITH_EPT=OFF -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF \
+                  -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF \
+                  -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF \
+                  -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF \
+                  -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF \
+                  -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF \
+                  -DWITH_INTERNAL_SPATIALINDEX=ON \
+                  -DENABLE_UNITY_BUILDS=ON
+              fi
+              cmake --build '"${BUILD_DIR}"' --target qgis
+
+              # Expose the built QGIS python modules + binaries, then run the suite
+              export QGIS_OUTPUT='"${BUILD_DIR}"'/output
+              export PYTHONPATH="$QGIS_OUTPUT/python:$PYTHONPATH"
+              export LD_LIBRARY_PATH="$QGIS_OUTPUT/lib:$LD_LIBRARY_PATH"
+              export QT_QPA_PLATFORM=offscreen
+              mkdir -p /root/QGIS/perf-results
+              cd /root/QGIS
+              python3 scripts/perf/qgis-perf-bench.py \
+                --data-dir /tmp/qgis-perf-bench-data \
+                --features ${{ inputs.features || 100000 }} \
+                --repeats 3 \
+                --json /root/QGIS/perf-results/bench.json \
+                --markdown /root/QGIS/perf-results/bench.md \
+                --label "run ${{ github.run_id }}"
+              echo done
+            '
+
+      - name: 📊 Publish benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## 📊 QGIS performance benchmark"
+            echo ""
+            if [ -f perf-results/bench.md ]; then
+              cat perf-results/bench.md
+            else
+              echo "Benchmark did not complete — check the build+run step logs."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 💾 Save ccache
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: perfbench-ccache-${{ github.run_id }}
