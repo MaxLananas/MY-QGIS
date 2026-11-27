@@ -217,8 +217,11 @@ documentation GitHub Actions (runners et facturation).
   localement ou via le workflow manuel **📊 Performance benchmark**
   (`.github/workflows/perf-bench.yml`) qui construit réellement QGIS et
   publie le tableau de timings dans le résumé du run.
-- Défaut de fork : cache d'images à 256 Mo (`cache/max-image-size`) —
-  documenté et réversible.
+- Cache d'images : le fork garde le défaut amont `0` = adaptatif
+  (≥ 32 Go RAM → 500 Mo, ≥ 16 Go → 250 Mo, sinon 100 Mo ;
+  `qgsimagecache.cpp:110-121`). Un bump statique à 256 Mo a été tenté
+  puis **reverté** : l'adaptatif natif est supérieur sur toutes les
+  classes de machines.
 
 ## 4. Thèmes « Aurora » (interface moderne)
 

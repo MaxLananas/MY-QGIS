@@ -211,7 +211,7 @@ timed "G_ninja_noop" cmake --build "$WORK/bC" -j
 echo "==> E: incremental, 1 TU edited, unity OFF"
 RUN_ID="r$$"
 echo "namespace liba { int extra_fn_${RUN_ID}(int x) { return x * 3 + 1; } }" >> "$ROOT/liba/unit_ga5.cpp"
-timed "E_incr_1file_no_unity" cmake --build "$WORK/bC" -j
+timed "E_incr_1file_no_unity" cmake --build "$WORK/bA" -j
 
 echo "==> F: incremental, 1 TU edited, unity ON"
 echo "namespace liba { int extra_fn_${RUN_ID}b(int x) { return x * 5 + 2; } }" >> "$ROOT/liba/unit_ga7.cpp"

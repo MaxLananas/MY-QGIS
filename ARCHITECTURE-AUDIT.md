@@ -28,13 +28,7 @@ l'ingénierie. Le fork apporte donc prioritairement de la **mesure** et des
 ## 2. Améliorations livrées dans ce fork (implémentées, pas seulement suggérées)
 
 ### Performance
-1. **Cache d'images par défaut à 256 Mo** (`resources/qgis_global_settings.ini`,
-   clé `cache/max-image-size` — vérifiée jusqu'à
-   `QgsImageCache` / `sTreeNetworkCache`, `qgsimagecache.cpp:100`). L'amont
-   calcule ~100 Mo quand la valeur vaut 0 ; les projets à symbologie SVG
-   riche re-rendent les mêmes images en boucle. Valeur doublée-commentée,
-   réversible par l'utilisateur (`0` = auto).
-2. **Architecture de build rapide à 3 niveaux + benchmarks C++** (voir
+1. **Architecture de build rapide à 3 niveaux + benchmarks C++** (voir
    `BENCHMARKS.md` et `FORK-NOTES.md`) : mesure du build elle-même
    (unity/PCH/ccache/mold), avec chiffres réels.
 
