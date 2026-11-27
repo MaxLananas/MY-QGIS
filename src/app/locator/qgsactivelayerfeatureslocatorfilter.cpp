@@ -61,8 +61,15 @@ QStringList QgsActiveLayerFeaturesLocatorFilter::prepare( const QString &string,
 {
   mFieldsCompletion.clear();
 
+  // A whole-number search string is interpreted as a feature ID lookup:
+  // single digits must not be skipped by the short-string guard below.
+  const QString trimmedString = string.trimmed();
+  bool fidOk = false;
+  const qlonglong fidCandidate = trimmedString.toLongLong( &fidOk );
+  mFidLookup = ( fidOk && fidCandidate >= 0 && !trimmedString.startsWith( '@' ) && !trimmedString.contains( ' ' ) ) ? fidCandidate : -1;
+
   // Normally skip very short search strings, unless when specifically searching using this filter or try to match fields
-  if ( string.length() < 3 && !context.usingPrefix && !string.startsWith( '@' ) )
+  if ( string.length() < 3 && !context.usingPrefix && !string.startsWith( '@' ) && mFidLookup < 0 )
     return QStringList();
 
   QgsSettings settings;
@@ -174,6 +181,36 @@ void QgsActiveLayerFeaturesLocatorFilter::fetchResults( const QString &string, c
   QgsFeature f;
   QString searchString = string;
   fieldRestriction( searchString );
+
+  // direct feature ID lookup: an integer search string offers to jump
+  // straight to that feature, regardless of its display expression
+  if ( mFidLookup >= 0 )
+  {
+    if ( QgsVectorLayer *layer = qobject_cast<QgsVectorLayer *>( QgisApp::instance()->activeLayer() ) )
+    {
+      QgsFeatureRequest fidRequest;
+      fidRequest.setFilterFid( mFidLookup );
+      QgsFeatureIterator fidIterator = layer->getFeatures( fidRequest );
+      QgsFeature fidFeature;
+      if ( fidIterator.nextFeature( fidFeature ) )
+      {
+        QgsLocatorResult result;
+        result.displayString = u"Jump to feature #%1"_s.arg( mFidLookup );
+        mContext.setFeature( fidFeature );
+        const QVariant displayValue = mDispExpression.isValid() ? mDispExpression.evaluate( &mContext ) : QVariant();
+        if ( displayValue.isValid() && !displayValue.toString().isEmpty() )
+          result.description = displayValue.toString();
+        result.setUserData(
+          QVariantMap( { { u"type"_s, QVariant::fromValue( ResultType::Feature ) }, { u"feature_id"_s, fidFeature.id() }, { u"layer_id"_s, mLayerId }, { u"layer_is_spatial"_s, mLayerIsSpatial } } )
+        );
+        result.icon = mLayerIcon;
+        result.score = 1.0;
+        if ( mLayerIsSpatial )
+          result.actions << QgsLocatorResult::ResultAction( OpenForm, tr( "Open form…" ) );
+        emit resultFetched( result );
+      }
+    }
+  }
 
   // propose available fields for restriction
   for ( const QString &field : std::as_const( mFieldsCompletion ) )

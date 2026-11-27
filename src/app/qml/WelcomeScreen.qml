@@ -202,6 +202,18 @@ Item {
                   projectSearchField.text = "";
                   projectSearchField.focus = false;
                 }
+                Keys.onReturnPressed: {
+                  // open the first matching project directly from the keyboard
+                  for ( let i = 0; i < recentProjectsModel.rowCount(); ++i )
+                  {
+                    const firstMatch = matchesList.itemAtIndex( i );
+                    if ( firstMatch && firstMatch.isMatch && firstMatch.Exists )
+                    {
+                      firstMatch.activate();
+                      return;
+                    }
+                  }
+                }
               }
             }
 
@@ -224,6 +236,8 @@ Item {
                 model: recentProjectsModel
 
                 delegate: Rectangle {
+                  id: delegateRoot
+
                   width: matchesList.width
                   height: isMatch && projectSearchField.text.length > 1 ? 40 * layoutSizeFactor : 0
                   visible: height > 0
@@ -262,6 +276,11 @@ Item {
                     }
                   }
 
+                  function activate() {
+                    welcomeScreenController.openProject( ProjectPath );
+                    welcomeScreenController.hideScene();
+                  }
+
                   MouseArea {
                     id: matchMouse
                     anchors.fill: parent
@@ -270,8 +289,7 @@ Item {
                     onClicked: {
                       if ( !Exists )
                         return;
-                      welcomeScreenController.openProject( ProjectPath );
-                      welcomeScreenController.hideScene();
+                      delegateRoot.activate();
                     }
                   }
                 }

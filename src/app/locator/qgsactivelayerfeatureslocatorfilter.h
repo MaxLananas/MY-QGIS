@@ -76,6 +76,8 @@ class APP_EXPORT QgsActiveLayerFeaturesLocatorFilter : public QgsLocatorFilter
     QStringList mAttributeAliases;
     QStringList mFieldsCompletion;
     int mMaxTotalResults = 30;
+    //! When a whole-number search string is typed, its value: offer to jump directly to that feature ID
+    qlonglong mFidLookup = -1;
 
     friend class TestQgsAppLocatorFilters;
 };

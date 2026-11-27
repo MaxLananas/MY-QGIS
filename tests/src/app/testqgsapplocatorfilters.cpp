@@ -71,6 +71,7 @@ class TestQgsAppLocatorFilters : public QObject
     void testLayers();
     void testLayouts();
     void testSearchActiveLayer();
+    void testFidJump();
     void testActiveLayerFieldRestriction();
     void testActiveLayerCompletion();
     void testSearchAllLayers();
@@ -240,6 +241,51 @@ void TestQgsAppLocatorFilters::testSearchActiveLayer()
 
   results = gatherResults( &filter, u"@my_text @home"_s, context );
   QCOMPARE( results.count(), 1 );
+
+  QgsProject::instance()->removeAllMapLayers();
+}
+
+void TestQgsAppLocatorFilters::testFidJump()
+{
+  const QString layerDef = u"Point?crs=epsg:4326&field=pk:integer&field=my_text:string"_s;
+  QgsVectorLayer *vl = new QgsVectorLayer( layerDef, u"FidLayer"_s, u"memory"_s );
+  QgsProject::instance()->addMapLayer( vl );
+
+  QgsFeature f;
+  f.setAttributes( QVector<QVariant>() << 1 << u"first"_s );
+  vl->dataProvider()->addFeature( f );
+  QgsFeature f2;
+  f2.setAttributes( QVector<QVariant>() << 2 << u"second"_s );
+  vl->dataProvider()->addFeature( f2 );
+  // memory provider assigns FIDs 1 and 2 in insertion order
+
+  vl->setDisplayExpression( u"\"my_text\""_s );
+  mQgisApp->setActiveLayer( vl );
+
+  QgsActiveLayerFeaturesLocatorFilter filter;
+  const QgsLocatorContext context;
+
+  // existing FID: top result is the direct jump
+  QList<QgsLocatorResult> results = gatherResults( &filter, u"2"_s, context );
+  QCOMPARE( results.count(), 1 );
+  QCOMPARE( results.at( 0 ).displayString(), u"Jump to feature #2"_s );
+  QCOMPARE( results.at( 0 ).userData().toMap().value( u"feature_id"_s ).value<QgsFeatureId>(), static_cast<QgsFeatureId>( 2 ) );
+  QCOMPARE( results.at( 0 ).score(), 1.0 );
+
+  // non-existent FID: no jump result
+  results = gatherResults( &filter, u"99"_s, context );
+  QCOMPARE( results.count(), 0 );
+
+  // single digit must not be skipped by the short-string guard
+  results = gatherResults( &filter, u"1"_s, context );
+  QCOMPARE( results.count(), 1 );
+  QCOMPARE( results.at( 0 ).displayString(), u"Jump to feature #1"_s );
+
+  // negative and non-integer strings: no FID lookup
+  results = gatherResults( &filter, u"-2"_s, context );
+  QCOMPARE( results.count(), 0 );
+  results = gatherResults( &filter, u"2.0"_s, context );
+  QCOMPARE( results.count(), 0 );
 
   QgsProject::instance()->removeAllMapLayers();
 }
