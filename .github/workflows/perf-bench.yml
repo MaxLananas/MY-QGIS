@@ -47,7 +47,10 @@ permissions:
   contents: read
 
 env:
-  BUILD_IMAGE: qgis/qgis3-ubuntu-qt6-build-deps-bin-only:master
+  # The FULL build-deps image (the binary-only Docker Hub target stops before
+  # the toolchain layer: no ccache, flex, libzip-dev, clang or mold — the
+  # real upstream CI compiles QGIS inside the full image).
+  BUILD_IMAGE: qgis/qgis3-ubuntu-qt6-build-deps:master
   BUILD_DIR: /root/QGIS/build-perf
 
 jobs:
@@ -69,11 +72,11 @@ jobs:
           sudo rm -rf /usr/local/lib/android/ || true
           df . -h
 
-      - name: 🐳 Pull the prebuilt QGIS build-deps image (local-build fallback)
+      - name: 🐳 Pull the full QGIS build-deps image (local-build fallback)
         run: |
           docker pull "${BUILD_IMAGE}" || {
-            echo "::warning::Prebuilt image pull failed — building the image locally (one-time slow path)."
-            docker build --target binary-only \
+            echo "::warning::Prebuilt image pull failed — building the FULL image locally (one-time slow path)."
+            docker build \
               -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile \
               -t "${BUILD_IMAGE}" .
           }
