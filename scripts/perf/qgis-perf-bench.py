@@ -256,7 +256,7 @@ def make_map_settings(project, extent):
         [l for l in project.mapLayers().values() if isinstance(l, QgsVectorLayer)]
     )
     settings.setExtent(extent)
-    settings.setOutputSize(QImage(1600, 1200, QImage.Format_RGB32).size())
+    settings.setOutputSize(QImage(1600, 1200, QImage.Format.Format_RGB32).size())
     settings.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
     settings.setBackgroundColor(QColor(255, 255, 255))
     settings.setFlag(Qgis.MapSettingsFlag.DrawLabeling, True)
@@ -543,7 +543,7 @@ def main():
                 s = QgsMapSettings()
                 s.setLayers([rlayer])
                 s.setExtent(rfull)
-                s.setOutputSize(QImage(1600, 1200, QImage.Format_RGB32).size())
+                s.setOutputSize(QImage(1600, 1200, QImage.Format.Format_RGB32).size())
                 s.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
                 do_render(s)
 
