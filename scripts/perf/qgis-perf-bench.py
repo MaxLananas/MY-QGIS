@@ -77,9 +77,6 @@ from qgis.core import (  # noqa: E402
     QgsVectorFileWriter,
     QgsVectorLayer,
 )
-from qgis.PyQt.QtCore import (
-    Qgis as _UnusedQt,  # noqa: F401  (ensures PyQt import path works)
-)
 from qgis.PyQt.QtGui import QColor, QImage, QPainter  # noqa: E402
 
 FIELDS = [
