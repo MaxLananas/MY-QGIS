@@ -406,6 +406,23 @@ def main():
         return n
     bench.run("coord_transform_100k", transforms)
 
+    # Hard reprojection: 4326 -> 2154 (Lambert-93) forces a real datum/ellipsoid
+    # path (not the near-identity web-mercator chain) - exercises the
+    # coordinate-operation machinery that everyday desktop reprojecting hits.
+    def transforms_hard():
+        xform = QgsCoordinateTransform(
+            QgsCoordinateReferenceSystem("EPSG:4326"),
+            QgsCoordinateReferenceSystem("EPSG:2154"),
+            project.transformContext(),
+        )
+        n = 0
+        for _ in range(1000):
+            for _ in range(100):
+                p = xform.transform(QgsPointXY(-5.0 + random.random() * 5.0, 41.0 + random.random() * 4.0))
+                n += 1
+        return n
+    bench.run("coord_transform_100k_hard", transforms_hard)
+
     bench.run("unique_values", lambda: len(pts.uniqueValues(pts.fields().lookupField("category"))))
 
     # ---- raster engine -------------------------------------------------------

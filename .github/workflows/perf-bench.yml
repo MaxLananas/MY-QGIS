@@ -11,6 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  # Runs automatically ONLY when a PR touches the perf files themselves
+  # (no cost otherwise); A/B comparison is on by default in that case.
+  pull_request:
+    paths:
+      - 'scripts/perf/**'
+      - 'scripts/bench-build.sh'
+      - '.github/workflows/perf-bench.yml'
   workflow_dispatch:
     inputs:
       features:
