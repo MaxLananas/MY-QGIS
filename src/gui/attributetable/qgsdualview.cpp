@@ -954,7 +954,7 @@ void QgsDualView::viewWillShowContextMenu( QMenu *menu, const QModelIndex &maste
         QgsFeature sqlFeature;
         QgsFeatureIterator sqlIterator = layerGuard->getFeatures( sqlRequest );
         while ( sqlIterator.nextFeature( sqlFeature ) )
-          sqlValues << QgsExpression::quotedValue( sqlFeature.attribute( sqlFieldIdx ) ).toString();
+          sqlValues << QgsExpression::quotedValue( sqlFeature.attribute( sqlFieldIdx ) );
         QApplication::clipboard()->setText( u"%1 IN (%2)"_s.arg( QgsExpression::quotedColumnRef( sqlFieldName ), sqlValues.join( ", "_L1 ) ) );
       } );
     }
