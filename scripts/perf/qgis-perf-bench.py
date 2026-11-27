@@ -39,6 +39,7 @@ Covered metrics
 
 Every metric reports median and best of N repetitions.
 """
+
 import argparse
 import json
 import os
@@ -59,6 +60,7 @@ from qgis.core import (  # noqa: E402
     QgsApplication,
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
+    QgsCoordinateTransformContext,
     QgsExpression,
     QgsExpressionContext,
     QgsFeature,
@@ -74,10 +76,10 @@ from qgis.core import (  # noqa: E402
     QgsRectangle,
     QgsVectorFileWriter,
     QgsVectorLayer,
-    QgsCoordinateTransformContext,
 )
-
-from qgis.PyQt.QtCore import Qgis as _UnusedQt  # noqa: F401  (ensures PyQt import path works)
+from qgis.PyQt.QtCore import (
+    Qgis as _UnusedQt,  # noqa: F401  (ensures PyQt import path works)
+)
 from qgis.PyQt.QtGui import QColor, QImage, QPainter  # noqa: E402
 
 FIELDS = [
@@ -100,9 +102,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
     # ---------------- points -------------------------------------------------
     pts_path = os.path.join(data_dir, "bench_points.gpkg")
     if not os.path.exists(pts_path):
-        layer = QgsVectorLayer(
-            "Point?crs=EPSG:4326", "bench_points_src", "memory"
-        )
+        layer = QgsVectorLayer("Point?crs=EPSG:4326", "bench_points_src", "memory")
         pr = layer.dataProvider()
         pr.addAttributes([QgsField(f, t) for f, t, *_ in FIELDS])
         layer.updateFields()
@@ -126,7 +126,9 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
             feats.append(f)
         pr.addFeatures(feats)
         res = QgsVectorFileWriter.writeAsVectorFormatV3(
-            layer, pts_path, QgsCoordinateTransformContext(),
+            layer,
+            pts_path,
+            QgsCoordinateTransformContext(),
             QgsVectorFileWriter.SaveVectorOptions(),
         )
         err = res[0] if isinstance(res, tuple) else res
@@ -137,9 +139,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
     # ---------------- polygons -----------------------------------------------
     poly_path = os.path.join(data_dir, "bench_polys.gpkg")
     if not os.path.exists(poly_path):
-        layer = QgsVectorLayer(
-            "Polygon?crs=EPSG:4326", "bench_polys_src", "memory"
-        )
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "bench_polys_src", "memory")
         pr = layer.dataProvider()
         pr.addAttributes([QgsField(f, t) for f, t, *_ in FIELDS[:4]])
         layer.updateFields()
@@ -162,8 +162,10 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
             feats.append(f)
         pr.addFeatures(feats)
         res = QgsVectorFileWriter.writeAsVectorFormatV3(
-            layer, poly_path, QgsCoordinateTransformContext(),
-            QgsVectorFileWriter.SaveVectorOptions()
+            layer,
+            poly_path,
+            QgsCoordinateTransformContext(),
+            QgsVectorFileWriter.SaveVectorOptions(),
         )
         err = res[0] if isinstance(res, tuple) else res
         if err != QgsVectorFileWriter.NoError:
@@ -185,8 +187,19 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
         rng2 = np.random.default_rng(20261126)
         arr = rng2.random((2000, 2000)).astype(np.float32) * 4000.0
         drv = gdal.GetDriverByName("GTiff")
-        ds = drv.Create(raster_path, 2000, 2000, 1, gdal.GDT_Float32,
-                        options=["COMPRESS=DEFLATE", "TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256"])
+        ds = drv.Create(
+            raster_path,
+            2000,
+            2000,
+            1,
+            gdal.GDT_Float32,
+            options=[
+                "COMPRESS=DEFLATE",
+                "TILED=YES",
+                "BLOCKXSIZE=256",
+                "BLOCKYSIZE=256",
+            ],
+        )
         ds.SetGeoTransform((-180.0, 360.0 / 2000.0, 0.0, 80.0, 0.0, -160.0 / 2000.0))
         srs = osr.SpatialReference()
         srs.ImportFromEPSG(4326)
@@ -203,8 +216,8 @@ class Bench:
 
     def __init__(self, repeats: int):
         self.repeats = repeats
-        self.results = {}   # name -> list of seconds
-        self.notes = {}     # name -> extra info
+        self.results = {}  # name -> list of seconds
+        self.notes = {}  # name -> extra info
 
     def run(self, name, fn, note=None, repeatable=True):
         times = []
@@ -215,8 +228,10 @@ class Bench:
         self.results[name] = times
         if note:
             self.notes[name] = note
-        print("  %-22s median %8.3f s  (best %8.3f s, n=%d)"
-              % (name, statistics.median(times), min(times), len(times)))
+        print(
+            "  %-22s median %8.3f s  (best %8.3f s, n=%d)"
+            % (name, statistics.median(times), min(times), len(times))
+        )
         return statistics.median(times)
 
     def table(self):
@@ -239,7 +254,9 @@ class Bench:
 
 def make_map_settings(project, extent):
     settings = QgsMapSettings()
-    settings.setLayers([l for l in project.mapLayers().values() if isinstance(l, QgsVectorLayer)])
+    settings.setLayers(
+        [l for l in project.mapLayers().values() if isinstance(l, QgsVectorLayer)]
+    )
     settings.setExtent(extent)
     settings.setOutputSize(QImage(1600, 1200, QImage.Format_RGB32).size())
     settings.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
@@ -258,14 +275,27 @@ def do_render(settings):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--data-dir", default="/tmp/qgis-perf-bench-data")
-    ap.add_argument("--features", type=int, default=100000, help="number of synthetic points")
-    ap.add_argument("--polys", type=int, default=3000, help="number of synthetic polygons")
-    ap.add_argument("--repeats", type=int, default=3, help="repetitions per benchmark (median reported)")
+    ap.add_argument(
+        "--features", type=int, default=100000, help="number of synthetic points"
+    )
+    ap.add_argument(
+        "--polys", type=int, default=3000, help="number of synthetic polygons"
+    )
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=3,
+        help="repetitions per benchmark (median reported)",
+    )
     ap.add_argument("--json", default=None, help="write full results as JSON")
     ap.add_argument("--markdown", default=None, help="write a markdown summary")
-    ap.add_argument("--label", default="", help="label (e.g. before/after) for the report header")
+    ap.add_argument(
+        "--label", default="", help="label (e.g. before/after) for the report header"
+    )
     args = ap.parse_args()
 
     print("== QGIS performance benchmark ==")
@@ -280,14 +310,17 @@ def main():
     bench.notes["app_init"] = "in-process headless init (not full UI startup)"
 
     # ---- data ---------------------------------------------------------------
-    have = (os.path.exists(os.path.join(args.data_dir, "bench_points.gpkg"))
-            and os.path.exists(os.path.join(args.data_dir, "bench_polys.gpkg")))
+    have = os.path.exists(
+        os.path.join(args.data_dir, "bench_points.gpkg")
+    ) and os.path.exists(os.path.join(args.data_dir, "bench_polys.gpkg"))
     if not have:
         t = time.perf_counter()
         info = generate_sample_data(args.data_dir, args.features, args.polys)
         gen_s = time.perf_counter() - t
-        print("  data_generation        %8.3f s  (%d pts / %d polys)"
-              % (gen_s, args.features, args.polys))
+        print(
+            "  data_generation        %8.3f s  (%d pts / %d polys)"
+            % (gen_s, args.features, args.polys)
+        )
         bench.results["data_generation"] = [gen_s]
         bench.notes["data_generation"] = "deterministic seed; excluded from comparisons"
     else:
@@ -296,17 +329,43 @@ def main():
         bench.notes["data_generation"] = "reused existing files"
 
     # ---- layers & project ---------------------------------------------------
-    pts = QgsVectorLayer(os.path.join(args.data_dir, "bench_points.gpkg") + "|layername=bench_points", "points", "ogr")
-    polys = QgsVectorLayer(os.path.join(args.data_dir, "bench_polys.gpkg") + "|layername=bench_polys", "polys", "ogr")
+    pts = QgsVectorLayer(
+        os.path.join(args.data_dir, "bench_points.gpkg") + "|layername=bench_points",
+        "points",
+        "ogr",
+    )
+    polys = QgsVectorLayer(
+        os.path.join(args.data_dir, "bench_polys.gpkg") + "|layername=bench_polys",
+        "polys",
+        "ogr",
+    )
     if not pts.isValid() or not polys.isValid():
         print("FATAL: generated layers invalid", file=sys.stderr)
         return 2
     # simple but non-trivial rendering: categorized fill + labeled points
-    from qgis.core import QgsCategorizedSymbolRenderer, QgsRendererCategory, QgsPalLayerSettings, QgsTextFormat, QgsVectorLayerSimpleLabeling
-    sym_a = QgsFillSymbol.createSimple({"color": "220,235,255", "outline_color": "60,90,140"})
-    sym_b = QgsFillSymbol.createSimple({"color": "255,230,200", "outline_color": "160,110,60"})
-    polys.setRenderer(QgsCategorizedSymbolRenderer(
-        "category", [QgsRendererCategory("alpha", sym_a, "alpha"), QgsRendererCategory("beta", sym_b, "beta")]))
+    from qgis.core import (
+        QgsCategorizedSymbolRenderer,
+        QgsPalLayerSettings,
+        QgsRendererCategory,
+        QgsTextFormat,
+        QgsVectorLayerSimpleLabeling,
+    )
+
+    sym_a = QgsFillSymbol.createSimple(
+        {"color": "220,235,255", "outline_color": "60,90,140"}
+    )
+    sym_b = QgsFillSymbol.createSimple(
+        {"color": "255,230,200", "outline_color": "160,110,60"}
+    )
+    polys.setRenderer(
+        QgsCategorizedSymbolRenderer(
+            "category",
+            [
+                QgsRendererCategory("alpha", sym_a, "alpha"),
+                QgsRendererCategory("beta", sym_b, "beta"),
+            ],
+        )
+    )
     lbl = QgsPalLayerSettings()
     lbl.fieldName = "name"
     fmt = QgsTextFormat()
@@ -331,6 +390,7 @@ def main():
         p2 = QgsProject.instance()
         p2.clear()
         p2.read(proj_path)
+
     bench.run("project_read", reopen)
     bench.notes["project_read"] = proj_path
 
@@ -340,11 +400,13 @@ def main():
     def render_first():
         s = make_map_settings(project, full_extent)
         do_render(s)
+
     bench.run("render_first", render_first, repeatable=False)
 
     def render_warm():
         s = make_map_settings(project, full_extent)
         do_render(s)
+
     bench.run("render_warm", render_warm)
     bench.notes["render_warm"] = "second identical render (renderer cache)"
 
@@ -355,6 +417,7 @@ def main():
             x += 8.0
             s = make_map_settings(project, QgsRectangle(x, -80, x + 360, 80))
             do_render(s)
+
     bench.run("pan_x10", pans)
     bench.notes["pan_x10"] = "10 successive 8-degree shifts, full re-render each"
 
@@ -362,22 +425,32 @@ def main():
     def zooms():
         ext = full_extent
         for _ in range(5):
-            ext = QgsRectangle(ext.xMinimum() + 40, ext.yMinimum() + 30,
-                               ext.xMaximum() - 40, ext.yMaximum() - 30)
+            ext = QgsRectangle(
+                ext.xMinimum() + 40,
+                ext.yMinimum() + 30,
+                ext.xMaximum() - 40,
+                ext.yMaximum() - 30,
+            )
             s = make_map_settings(project, ext)
             do_render(s)
+
     bench.run("zoom_x5", zooms)
     bench.notes["zoom_x5"] = "5 successive 2x zoom-ins"
 
     # ---- data & expression engines -----------------------------------------
-    bench.run("feature_scan", lambda: sum(1 for _ in pts.getFeatures()), note="%d features" % args.features)
+    bench.run(
+        "feature_scan",
+        lambda: sum(1 for _ in pts.getFeatures()),
+        note="%d features" % args.features,
+    )
 
     def expr_filter():
-        req = QgsFeatureRequest(QgsExpression("\"count\" > 500"))
+        req = QgsFeatureRequest(QgsExpression('"count" > 500'))
         return sum(1 for _ in pts.getFeatures(req))
+
     bench.run("expression_filter", expr_filter)
 
-    expr = QgsExpression("\"value\" * 2 + length(\"name\")")
+    expr = QgsExpression('"value" * 2 + length("name")')
     ctx = QgsExpressionContext()
     expr.prepare(ctx)
 
@@ -390,6 +463,7 @@ def main():
             expr.evaluate(ctx)
             n += 1
         return n
+
     bench.run("expression_eval", expr_eval)
 
     def transforms():
@@ -401,9 +475,15 @@ def main():
         n = 0
         for _ in range(1000):
             for _ in range(100):
-                p = xform.transform(QgsPointXY(-179.0 + random.random() * 358.0, -79.0 + random.random() * 158.0))
+                p = xform.transform(
+                    QgsPointXY(
+                        -179.0 + random.random() * 358.0,
+                        -79.0 + random.random() * 158.0,
+                    )
+                )
                 n += 1
         return n
+
     bench.run("coord_transform_100k", transforms)
 
     # Hard reprojection: 4326 -> 2154 (Lambert-93) forces a real datum/ellipsoid
@@ -418,12 +498,20 @@ def main():
         n = 0
         for _ in range(1000):
             for _ in range(100):
-                p = xform.transform(QgsPointXY(-5.0 + random.random() * 5.0, 41.0 + random.random() * 4.0))
+                p = xform.transform(
+                    QgsPointXY(
+                        -5.0 + random.random() * 5.0, 41.0 + random.random() * 4.0
+                    )
+                )
                 n += 1
         return n
+
     bench.run("coord_transform_100k_hard", transforms_hard)
 
-    bench.run("unique_values", lambda: len(pts.uniqueValues(pts.fields().lookupField("category"))))
+    bench.run(
+        "unique_values",
+        lambda: len(pts.uniqueValues(pts.fields().lookupField("category"))),
+    )
 
     # ---- raster engine -------------------------------------------------------
     raster_path = os.path.join(args.data_dir, "bench_raster.tif")
@@ -446,8 +534,12 @@ def main():
                         blk = dp.block(1, QgsRectangle(x0, y0, x1, y1), w, h)
                         total += 1 if blk else 0
                 return total
-            bench.run("raster_blocks_64", raster_blocks,
-                      note="64 blocks of 256x256 from 2000x2000 GeoTIFF")
+
+            bench.run(
+                "raster_blocks_64",
+                raster_blocks,
+                note="64 blocks of 256x256 from 2000x2000 GeoTIFF",
+            )
 
             def raster_render():
                 s = QgsMapSettings()
@@ -456,24 +548,37 @@ def main():
                 s.setOutputSize(QImage(1600, 1200, QImage.Format_RGB32).size())
                 s.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
                 do_render(s)
-            bench.run("raster_render_full", raster_render,
-                      note="full render of the 2000x2000 GeoTIFF")
+
+            bench.run(
+                "raster_render_full",
+                raster_render,
+                note="full render of the 2000x2000 GeoTIFF",
+            )
         else:
             print("  raster benchmarks skipped: invalid raster layer")
 
     # ---- optional: processing ----------------------------------------------
     try:
         import processing  # noqa
+
         alg_ready = True
     except Exception:
         alg_ready = False
     if alg_ready:
         try:
+
             def run_alg():
-                processing.run("native:buffer",
-                              {"INPUT": polys, "DISTANCE": 0.5, "OUTPUT": "memory:"},
-                              feedback=None)
-            bench.run("processing_buffer", run_alg, note="native:buffer on %d polys" % args.polys)
+                processing.run(
+                    "native:buffer",
+                    {"INPUT": polys, "DISTANCE": 0.5, "OUTPUT": "memory:"},
+                    feedback=None,
+                )
+
+            bench.run(
+                "processing_buffer",
+                run_alg,
+                note="native:buffer on %d polys" % args.polys,
+            )
         except Exception as e:  # alg missing in minimal builds
             print("  processing_buffer skipped: %s" % e)
     else:
@@ -481,6 +586,7 @@ def main():
 
     # ---- memory -------------------------------------------------------------
     import resource
+
     maxrss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
     bench.results["memory_peak_rss_mb"] = [maxrss_mb]
     bench.notes["memory_peak_rss_mb"] = "peak RSS (linux: KB units converted)"
@@ -504,16 +610,41 @@ def main():
 
     if args.markdown:
         with open(args.markdown, "w") as f:
-            f.write("# QGIS performance benchmark%s\n\n" % (" — " + args.label if args.label else ""))
-            f.write("| Metric | Median (s) | p10 (s) | p90 (s) | Best (s) | n | Note |\n|---|---|---|---|---|---|---|\n")
+            f.write(
+                "# QGIS performance benchmark%s\n\n"
+                % (" — " + args.label if args.label else "")
+            )
+            f.write(
+                "| Metric | Median (s) | p10 (s) | p90 (s) | Best (s) | n | Note |\n|---|---|---|---|---|---|---|\n"
+            )
             for r in rows:
-                f.write("| %s | %s | %s | %s | %s | %d | %s |\n" % (
-                    r["name"], r["median_s"], r.get("p10_s", "-"), r.get("p90_s", "-"),
-                    r["best_s"], r["n"], r["note"]))
-            f.write("\nEnvironment: QGIS %s, Qt %s, Python %s, cores %s, %d pts / %d polys\n"
-                    % (env["qgis"], env["qt"], env["python"], env["cores"], env["features"], env["polys"]))
-            f.write("\n> Synthetic deterministic data (seed 20261126). Real QGIS timings,\n"
-                    "> regression-tracking purposes — not comparable across datasets.\n")
+                f.write(
+                    "| %s | %s | %s | %s | %s | %d | %s |\n"
+                    % (
+                        r["name"],
+                        r["median_s"],
+                        r.get("p10_s", "-"),
+                        r.get("p90_s", "-"),
+                        r["best_s"],
+                        r["n"],
+                        r["note"],
+                    )
+                )
+            f.write(
+                "\nEnvironment: QGIS %s, Qt %s, Python %s, cores %s, %d pts / %d polys\n"
+                % (
+                    env["qgis"],
+                    env["qt"],
+                    env["python"],
+                    env["cores"],
+                    env["features"],
+                    env["polys"],
+                )
+            )
+            f.write(
+                "\n> Synthetic deterministic data (seed 20261126). Real QGIS timings,\n"
+                "> regression-tracking purposes — not comparable across datasets.\n"
+            )
 
     qgs.exitQgis()
     return 0

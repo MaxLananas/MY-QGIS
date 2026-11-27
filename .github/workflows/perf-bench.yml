@@ -94,8 +94,10 @@ jobs:
       # for its own deltas).
       - name: 🌋 Build + run benchmark (fork vs upstream)
         run: |
+          mkdir -p perf-results
           docker run --rm             -v $(pwd):/root/QGIS             -v $(pwd)/.ccache:/root/.ccache             --env-file .docker/docker-variables.env             -e CCACHE_DIR=/root/.ccache             "${BUILD_IMAGE}" bash -c '
               set -e
+              trap "printf \"FAILED rc=%s cmd=%s\n\" \"\$?\" \"\$BASH_COMMAND\" > /root/QGIS/perf-results/failure.txt" ERR
               git config --global --add safe.directory /root/QGIS
               ccache -M 2G
               ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
@@ -141,7 +143,14 @@ jobs:
 
               echo "==> ccache statistics:"
               ccache -s | tail -6
-            '
+            ' || {
+              echo "### 🔥 Build/bench failure diagnosis" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              cat perf-results/failure.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(no in-container failure capture)" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            }
 
       - name: 📊 Publish benchmark summary
         if: always()
@@ -166,23 +175,7 @@ jobs:
               echo ""
               echo "### Fork delta vs reference (median)"
               echo ""
-              python3 - <<'PY'
-              import json, os
-              f = 'perf-results/bench-fork.json'
-              r = 'perf-results/bench-reference.json'
-              if os.path.exists(f) and os.path.exists(r):
-                  fj = {x['name']: x for x in json.load(open(f))['rows']}
-                  rj = {x['name']: x for x in json.load(open(r))['rows']}
-                  print('| Metric | Reference (s) | Fork (s) | Delta |')
-                  print('|---|---|---|---|')
-                  for k, rv in rj.items():
-                      fv = fj.get(k)
-                      if fv and rv['median_s'] and fv['median_s']:
-                          d = (fv['median_s'] - rv['median_s']) / rv['median_s'] * 100
-                          print('| %s | %.4f | %.4f | %+.1f%% |' % (k, rv['median_s'], fv['median_s'], d))
-              else:
-                  print('Comparison unavailable (reference run missing).')
-              PY
+              python3 scripts/perf/ab_summary.py perf-results/bench-fork.json perf-results/bench-reference.json
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
