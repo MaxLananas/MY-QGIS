@@ -385,9 +385,12 @@ def main():
     bench.notes["project_write"] = "%d layers" % len(project.mapLayers())
 
     def reopen():
-        p2 = QgsProject.instance()
-        p2.clear()
+        # read into a throwaway project instance: re-reading the singleton
+        # would delete the live pts/polys layer objects (run 46046084501:
+        # 'wrapped C/C++ object of type QgsVectorLayer has been deleted')
+        p2 = QgsProject()
         p2.read(proj_path)
+        return p2.count()
 
     bench.run("project_read", reopen)
     bench.notes["project_read"] = proj_path
