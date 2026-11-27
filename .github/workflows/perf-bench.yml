@@ -103,9 +103,9 @@ jobs:
               # Preflight: the bin-only image ships clang/mold/ninja but not
               # ccache; install it on the fly and pick compilers/linker that
               # actually exist. Both A/B sides use the SAME resolved flags.
-              if ! command -v ccache >/dev/null 2>&1; then
+              if ! command -v ccache >/dev/null 2>&1 || ! command -v flex >/dev/null 2>&1 || ! command -v mold >/dev/null 2>&1; then
                 apt-get update -qq
-                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache flex bison mold
               fi
               if command -v mold >/dev/null 2>&1; then
                 LINKER_FLAG="-DUSE_ALTERNATE_LINKER=mold"
