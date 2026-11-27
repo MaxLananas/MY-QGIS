@@ -8,7 +8,9 @@ name: 📊 Performance benchmark
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A full A/B (fork + upstream builds + benches) takes well over an hour:
+  # never cancel a running benchmark, or every push wipes the results.
+  cancel-in-progress: false
 
 on:
   # Runs automatically ONLY when a PR touches the perf files themselves
