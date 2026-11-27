@@ -146,7 +146,7 @@ def generate_sample_data(data_dir: str, n_points: int, n_polys: int) -> dict:
             x0 = -179.0 + rng.random() * 350.0
             y0 = -79.0 + rng.random() * 150.0
             dx, dy = 0.5 + rng.random() * 4.0, 0.5 + rng.random() * 3.0
-            g = QgsGeometry.fromRectXY(QgsRectangle(x0, y0, x0 + dx, y0 + dy))
+            g = QgsGeometry.fromRect(QgsRectangle(x0, y0, x0 + dx, y0 + dy))
             f = QgsFeature(layer.fields())
             f.setGeometry(g)
             f.setAttributes(
