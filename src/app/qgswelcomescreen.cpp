@@ -141,7 +141,7 @@ void QgsWelcomeScreenController::openKeyboardShortcuts()
 void QgsWelcomeScreenController::reportIssue()
 {
   // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
-  QTimer::singleShot( 1, this, []() { QgisApp::instance()->openURL( QStringLiteral( "https://qgis.org/resources/support/bug-reporting/" ), false ); } );
+  QTimer::singleShot( 1, this, []() { QgisApp::instance()->openURL( u"https://qgis.org/resources/support/bug-reporting/"_s, false ); } );
 }
 
 
