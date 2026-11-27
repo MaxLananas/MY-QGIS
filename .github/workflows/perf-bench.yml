@@ -101,7 +101,7 @@ jobs:
         run: |
           mkdir -p perf-results
           docker run --rm             -v $(pwd):/root/QGIS             -v $(pwd)/.ccache:/root/.ccache             --env-file .docker/docker-variables.env             -e CCACHE_DIR=/root/.ccache             "${BUILD_IMAGE}" bash -c '
-              set -e
+              set -eo errtrace
               trap "printf \"FAILED rc=%s cmd=%s\n\" \"\$?\" \"\$BASH_COMMAND\" > /root/QGIS/perf-results/lastcmd.txt" ERR
               git config --global --add safe.directory /root/QGIS
 
@@ -177,11 +177,11 @@ jobs:
               echo "==> ccache statistics:"
               ccache -s | tail -6
             ' > perf-results/buildlog.txt 2>&1 || {
-              grep -E "CMake Error|Could ?NOT find|Could not find|Configuring incomplete|ninja: error|error:" perf-results/buildlog.txt 2>/dev/null | grep -v "^CMake Error at /usr/share/cmake" | tail -10 > perf-results/errors.txt
+              grep -aiE "CMake Error|Could ?NOT find|Could not find|Configuring incomplete|ninja: error|error:|Traceback|RuntimeError|ImportError|FileNotFoundError" perf-results/buildlog.txt 2>/dev/null | tail -12 > perf-results/errors.txt
               if [ ! -s perf-results/errors.txt ]; then
                 # No recognisable error text (e.g. OOM-killed compile): fall
-                # back to the raw tail so the annotations still show something.
-                tail -n 15 perf-results/buildlog.txt 2>/dev/null > perf-results/errors.txt
+                # back to the raw tail so the diagnosis still has content.
+                tail -n 20 perf-results/buildlog.txt 2>/dev/null > perf-results/errors.txt
               fi
               {
                 echo "### 🔥 Build/bench failure diagnosis"
@@ -191,9 +191,24 @@ jobs:
                 cat perf-results/errors.txt 2>/dev/null || true
                 echo '```'
               } >> "$GITHUB_STEP_SUMMARY"
-              { cat perf-results/lastcmd.txt 2>/dev/null; cat perf-results/errors.txt 2>/dev/null; } | while IFS= read -r line; do echo "::error::${line:0:500}"; done
               exit 1
             }
+
+      - name: 🧯 Report failure as REST annotations
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Step-log ::error:: lines proved unreliable for this job — post the
+          # captured diagnosis straight to the check-run annotations API.
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[0].id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          jq -Rn '[inputs | select(length>0) | {path: ".github/workflows/perf-bench.yml", start_line: 1, end_line: 1, annotation_level: "failure", message: (.[0:400])}]' \
+            perf-results/lastcmd.txt perf-results/errors.txt > /tmp/anns.json 2>/dev/null || echo "[]" > /tmp/anns.json
+          gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID/annotations" --input /tmp/anns.json >/dev/null || true
+          echo "diagnosis:"
+          cat perf-results/lastcmd.txt 2>/dev/null || true
+          cat perf-results/errors.txt 2>/dev/null || true
 
       - name: 📊 Publish benchmark summary
         if: always()
