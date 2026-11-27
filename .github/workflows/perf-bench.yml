@@ -97,7 +97,7 @@ jobs:
           mkdir -p perf-results
           docker run --rm             -v $(pwd):/root/QGIS             -v $(pwd)/.ccache:/root/.ccache             --env-file .docker/docker-variables.env             -e CCACHE_DIR=/root/.ccache             "${BUILD_IMAGE}" bash -c '
               set -e
-              trap "printf \"FAILED rc=%s cmd=%s\n\" \"\$?\" \"\$BASH_COMMAND\" > /root/QGIS/perf-results/failure.txt" ERR
+              trap "printf \"FAILED rc=%s cmd=%s\n\" \"\$?\" \"\$BASH_COMMAND\" > /root/QGIS/perf-results/lastcmd.txt" ERR
               git config --global --add safe.directory /root/QGIS
               ccache -M 2G
               ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
@@ -143,12 +143,14 @@ jobs:
 
               echo "==> ccache statistics:"
               ccache -s | tail -6
-            ' || {
+            ' > perf-results/buildlog.txt 2>&1 || {
               echo "### 🔥 Build/bench failure diagnosis" >> "$GITHUB_STEP_SUMMARY"
               echo "" >> "$GITHUB_STEP_SUMMARY"
               echo '```' >> "$GITHUB_STEP_SUMMARY"
-              cat perf-results/failure.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(no in-container failure capture)" >> "$GITHUB_STEP_SUMMARY"
+              cat perf-results/lastcmd.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(no in-container failure capture)" >> "$GITHUB_STEP_SUMMARY"
               echo '```' >> "$GITHUB_STEP_SUMMARY"
+              tail -c 4000 perf-results/buildlog.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY"
+              { cat perf-results/lastcmd.txt 2>/dev/null; tail -c 2000 perf-results/buildlog.txt 2>/dev/null; } | while IFS= read -r line; do echo "::error::${line:0:500}"; done
               exit 1
             }
 
