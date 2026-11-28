@@ -91,7 +91,26 @@ jobs:
       - name: 📊 Summary
         if: always()
         run: |
-          { echo "## S1 · cold full build"; echo '```'; cat results/timings.txt 2>/dev/null; echo '```'; cat results/ninja_analysis.md 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+          echo "## S1 · cold full build" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/timings.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/ninja_analysis.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: 🧯 Failure diagnosis → REST check-run summary
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("S1")) | .id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          {
+            echo "=== timings ==="; cat results/timings.txt 2>/dev/null || echo none
+            echo "=== configure.log tail ==="; tail -n 25 results/configure.log 2>/dev/null || echo none
+            echo "=== build.log tail ==="; tail -n 35 results/build.log 2>/dev/null || echo none
+            echo "=== ccache ==="; cat results/ccache_stats.txt 2>/dev/null || echo none
+          } > /tmp/diag.txt
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "S1 cold build failure diagnosis", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "diagnosis posted"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -320,11 +339,25 @@ jobs:
       - name: 📊 Summary
         if: always()
         run: |
-          echo "## S0 · serial qgis_core profile" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat results/timings.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cat results/ninja_analysis.md 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          echo "## S0 · serial qgis_core profile" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/timings.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/ninja_analysis.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: 🧯 Failure diagnosis → REST check-run summary
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("S0")) | .id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          {
+            echo "=== timings ==="; cat results/timings.txt 2>/dev/null || echo none
+            echo "=== configure.log tail ==="; tail -n 25 results/configure.log 2>/dev/null || echo none
+            echo "=== serial_core.log tail ==="; tail -n 35 results/serial_core.log 2>/dev/null || echo none
+          } > /tmp/diag.txt
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "S0 serial profile failure diagnosis", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "diagnosis posted"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
