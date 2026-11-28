@@ -150,13 +150,15 @@ jobs:
                 local LABEL="$1" TREE="$2" BUILD="$3"
                 # PyQGIS staging lives in $BUILD/output/python; UTF-8 locale
                 # required by Qt/QGIS python (C/ANSI_X3.4 warns otherwise).
+                # The bench script itself always comes from the FORK tree:
+                # /root/QGIS-ref (upstream) does not contain it.
                 export LANG=C.UTF-8 LC_ALL=C.UTF-8
                 export QGIS_OUTPUT="$BUILD/output"
                 export PYTHONPATH="$QGIS_OUTPUT/python:$PYTHONPATH"
                 export LD_LIBRARY_PATH="$QGIS_OUTPUT/lib:$LD_LIBRARY_PATH"
                 export QT_QPA_PLATFORM=offscreen
                 cd "$TREE"
-                python3 scripts/perf/qgis-perf-bench.py                   --data-dir /tmp/qgis-perf-bench-data                   --features ${{ inputs.features || 100000 }}                   --repeats 5                   --json "/root/QGIS/perf-results/bench-$LABEL.json"                   --markdown "/root/QGIS/perf-results/bench-$LABEL.md"                   --label "$LABEL"
+                python3 /root/QGIS/scripts/perf/qgis-perf-bench.py                   --data-dir /tmp/qgis-perf-bench-data                   --features ${{ inputs.features || 100000 }}                   --repeats 5                   --json "/root/QGIS/perf-results/bench-$LABEL.json"                   --markdown "/root/QGIS/perf-results/bench-$LABEL.md"                   --label "$LABEL"
               }
 
               # ---- 1) the fork -------------------------------------------------
