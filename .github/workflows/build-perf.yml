@@ -438,63 +438,22 @@ jobs:
         with:
           pattern: results-*
           path: artifacts/
-      - name: 📈 Assemble the verdict
+      - name: 📈 Assemble the verdict (REST-readable)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
-          import json, glob, os
-          def read(path):
-              try:
-                  return open(path, errors="replace").read()
-              except OSError:
-                  return ""
-          lines = ["## 🏗 Build performance — verdict", ""]
-          def timings(scen):
-              d = {}
-              for line in read(f"artifacts/results-{scen}/timings.txt").splitlines():
-                  p = line.split()
-                  if len(p) == 2:
-                      try: d[p[0]] = int(p[1])
-                      except ValueError: d[p[0]] = p[1]
-              return d
-          cold = timings("s1-cold")
-          warm = timings("s2-warm")
-          incr = timings("s3-incremental")
-          dep = timings("s4-dependency")
-          links = timings("linker-ab")
-          def ms(v): return f"{v/1000:.0f} s" if isinstance(v, int) else str(v)
-          cb = cold.get("build_ms"); wb = warm.get("warm_build_ms_1")
-          lines.append("| Scenario | Time |")
-          lines.append("|---|---|")
-          if cb: lines.append(f"| S1 cold full build | {ms(cb)} |")
-          if wb: lines.append(f"| S2 warm full build (median of 2) | {ms(wb)} |")
-          for k in sorted(incr):
-              if k.startswith("incr_"): lines.append(f"| S3 {k} | {ms(incr[k])} |")
-          if dep.get("dep_total_ms"): lines.append(f"| S4 dependency-style rebuild | {ms(dep['dep_total_ms'])} |")
-          if links.get("link_bfd_ms"): lines.append(f"| Link (bfd, all-objects rebuild) | {ms(links['link_bfd_ms'])} |")
-          if links.get("link_mold_ms"): lines.append(f"| Link (mold, same objects) | {ms(links['link_mold_ms'])} |")
-          lines.append("")
-          na = {}
-          try:
-              na = json.load(open("artifacts/results-s1-cold/ninja_analysis.json"))
-          except Exception:
-              pass
-          if na:
-              busy = na.get("busy_ms", 0)
-              lines.append(f"**Cold build busy core-seconds: {busy/1000:.0f}** — wall floor at N vCPU "
-                           f"(excludes configure/link idle gaps):")
-              for c in (4, 8, 16, 32):
-                  lines.append(f"- {c} vCPU → ≥ {busy/1000/c/60:.1f} min")
-              lines.append(f"- Measured cold wall on 4 vCPU: {cb/1000/60:.1f} min" if cb else "")
-              lines.append("")
-              lines.append(f"Parallel efficiency (busy/wall): {na.get('efficiency')}; slowest edge {na.get('max_ms', 0)} ms")
-          five_min_ok = cb and cb < 300_000
-          lines.append("")
-          lines.append(f"**Verdict: full cold build {'MEETS' if five_min_ok else 'CANNOT MEET'} the 5-minute target on 4 vCPU "
-                       f"(busy-core floor is the proof).**")
-          if incr:
-              best = min(v for k, v in incr.items() if k.startswith("incr_") and isinstance(v, int))
-              lines.append(f"**Verdict: incremental (1 TU) best = {ms(best)} — {'MEETS' if best < 120_000 else 'CANNOT MEET'} the 2-minute target.**")
-          print("\n".join(lines))
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-              f.write("\n".join(lines))
-          PY
+          python3 scripts/build-perf/aggregate.py artifacts/ --markdown /tmp/verdict.md
+          {
+            echo "=== verdict ==="
+            cat /tmp/verdict.md
+            echo "=== S0 timings ==="
+            cat artifacts/results-s0-serial/timings.txt 2>/dev/null || echo none
+            echo "=== S1 timings ==="
+            cat artifacts/results-s1-cold/timings.txt 2>/dev/null || echo none
+            echo "=== ccache (S1) ==="
+            cat artifacts/results-s1-cold/ccache_stats.txt 2>/dev/null || echo none
+          } > /tmp/diag.txt
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("📈")) | .id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "Build performance verdict", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "verdict posted"
