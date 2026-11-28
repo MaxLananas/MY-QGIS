@@ -256,7 +256,26 @@ jobs:
               echo ""
               python3 scripts/perf/ab_summary.py perf-results/bench-fork.json perf-results/bench-reference.json
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee /tmp/ab-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📎 Upload raw benchmark results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-results
+          path: |
+            perf-results/
+            /tmp/ab-summary.md
+
+      - name: 🧯 Publish verdict to REST check-run summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[0].id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          jq -n --rawfile s /tmp/ab-summary.md '{output: {title: "A/B fork vs upstream — results", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "verdict posted"
 
       - name: 💾 Save ccache
         if: success()
