@@ -48,7 +48,11 @@ jobs:
       - name: 🧹 Reclaim disk space
         run: sudo rm -rf /usr/local/lib/android/ || true
       - name: 🐳 Pull the full QGIS build-deps image
-        run: docker pull "${BUILD_IMAGE}"
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
       # deliberately NO cache restore: pure cold scenario
       - name: 🌋 Cold build (ALL target, PyQGIS included)
         run: |
@@ -56,7 +60,7 @@ jobs:
           # peak-memory sampler
           ( while :; do awk '/MemAvailable/{print $2}' /proc/meminfo >> results/memavail.log; sleep 1; done ) &
           SAMPLER=$!
-          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache \
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
             --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
@@ -112,7 +116,11 @@ jobs:
       - name: 🧹 Reclaim disk space
         run: sudo rm -rf /usr/local/lib/android/ || true
       - name: 🐳 Pull the full QGIS build-deps image
-        run: docker pull "${BUILD_IMAGE}"
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
       - name: 💾 Restore warm cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -125,7 +133,7 @@ jobs:
       - name: 🌋 Warm build ×2 (fresh build dir each time)
         run: |
           mkdir -p results
-          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache \
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
             --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
@@ -170,7 +178,11 @@ jobs:
       - name: 🧹 Reclaim disk space
         run: sudo rm -rf /usr/local/lib/android/ || true
       - name: 🐳 Pull the full QGIS build-deps image
-        run: docker pull "${BUILD_IMAGE}"
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
       - name: 💾 Restore warm cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -180,7 +192,7 @@ jobs:
       - name: 🌋 Warm build, then 1-TU edit ×3
         run: |
           mkdir -p results
-          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache \
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
             --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
@@ -224,7 +236,11 @@ jobs:
       - name: 🧹 Reclaim disk space
         run: sudo rm -rf /usr/local/lib/android/ || true
       - name: 🐳 Pull the full QGIS build-deps image
-        run: docker pull "${BUILD_IMAGE}"
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
       - name: 💾 Restore warm cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -234,7 +250,7 @@ jobs:
       - name: 🌋 Touch widely-included header, rebuild
         run: |
           mkdir -p results
-          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache \
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
             --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
@@ -279,11 +295,15 @@ jobs:
       - name: 🧹 Reclaim disk space
         run: sudo rm -rf /usr/local/lib/android/ || true
       - name: 🐳 Pull the full QGIS build-deps image
-        run: docker pull "${BUILD_IMAGE}"
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
       - name: 🌋 Serial (-j1 -v) qgis_core build
         run: |
           mkdir -p results
-          docker run --rm -v $(pwd):/root/QGIS \
+          docker run --rm -v $(pwd):/root/QGIS -e BASE_FLAGS="${BASE_FLAGS}" \
             --env-file .docker/docker-variables.env \
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
@@ -323,7 +343,11 @@ jobs:
       - name: 🧹 Reclaim disk space
         run: sudo rm -rf /usr/local/lib/android/ || true
       - name: 🐳 Pull the full QGIS build-deps image
-        run: docker pull "${BUILD_IMAGE}"
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
       - name: 💾 Restore warm cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -333,7 +357,7 @@ jobs:
       - name: 🌋 Same objects, two linkers
         run: |
           mkdir -p results
-          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache \
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
             --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
