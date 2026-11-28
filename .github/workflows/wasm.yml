@@ -5,12 +5,9 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
-    branches:
-      - master
-      - release-**
-      - queued_ltr_backports
-  pull_request:
+  # NOTE (fork): WASM builds are very heavy — manual only from the "Run
+  # workflow" button.
+  workflow_dispatch:
 
 permissions:
   contents: read

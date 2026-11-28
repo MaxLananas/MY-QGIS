@@ -19,6 +19,7 @@
 
 #include "qgisapp.h"
 #include "qgsapplication.h"
+#include "qgshelp.h"
 #include "qgspluginmanager.h"
 #include "qgssettings.h"
 #include "qgssettingsentryimpl.h"
@@ -48,6 +49,13 @@ void QgsWelcomeScreenController::openProject( const QString &path )
 {
   // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
   QTimer::singleShot( 1, this, [path]() { QgisApp::instance()->openProject( path ); } );
+}
+
+void QgsWelcomeScreenController::openProjectDialog()
+{
+  // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
+  // (and to let the welcome screen hide before the modal dialog opens)
+  QTimer::singleShot( 1, this, []() { QMetaObject::invokeMethod( QgisApp::instance(), "fileOpen" ); } );
 }
 
 void QgsWelcomeScreenController::createBlankProject()
@@ -118,9 +126,30 @@ void QgsWelcomeScreenController::forwardDrop( const QString &text, const QString
   QgisApp::instance()->dropEvent( &dropEvent );
 }
 
+void QgsWelcomeScreenController::openUserManual()
+{
+  // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
+  QTimer::singleShot( 1, this, []() { QgsHelp::openHelp( u"index.html"_s ); } );
+}
+
+void QgsWelcomeScreenController::openKeyboardShortcuts()
+{
+  // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
+  QTimer::singleShot( 1, this, []() { QMetaObject::invokeMethod( QgisApp::instance(), "configureShortcuts" ); } );
+}
+
+void QgsWelcomeScreenController::reportIssue()
+{
+  // QTimer needed to prevent crashes when the Item bound to the calling function is deleted by the ListView
+  QTimer::singleShot( 1, this, []() { QgisApp::instance()->openURL( u"https://qgis.org/resources/support/bug-reporting/"_s, false ); } );
+}
+
 
 const QgsSettingsEntryBool *QgsWelcomeScreen::settingsCheckVersion
   = new QgsSettingsEntryBool( u"check-version"_s, QgsSettingsTree::sTreeApp, true, u"Whether the welcome screen should check for a newer QGIS version online"_s );
+
+const QgsSettingsEntryBool *QgsWelcomeScreen::settingsFirstRunGuideDone
+  = new QgsSettingsEntryBool( u"first-run-guide-done"_s, QgsSettingsTree::sTreeApp, false, u"Whether the welcome screen first-run getting started guide has been shown already"_s );
 
 QgsWelcomeScreen::QgsWelcomeScreen( bool skipVersionCheck, QWidget *parent )
   : QQuickWidget( parent )
@@ -147,6 +176,7 @@ QgsWelcomeScreen::QgsWelcomeScreen( bool skipVersionCheck, QWidget *parent )
   rootContext()->setContextProperty( u"newsFeedParser"_s, mNewsFeedParser );
   rootContext()->setContextProperty( u"newsFeedModel"_s, mNewsFeedModel );
   rootContext()->setContextProperty( u"welcomeScreenController"_s, mWelcomeScreenController );
+  rootContext()->setContextProperty( u"firstRunGuide"_s, !settingsFirstRunGuideDone->value() );
 
   setResizeMode( QQuickWidget::ResizeMode::SizeRootObjectToView );
 
@@ -203,6 +233,14 @@ void QgsWelcomeScreen::showScene()
   show();
   setFocus( Qt::OtherFocusReason );
   emit mWelcomeScreenController->welcomeScreenShown();
+
+  // The first-run getting started guide is only highlighted on the very
+  // first launch: from the next startup on, the welcome screen opens on
+  // the recent projects or templates tab as usual.
+  if ( !settingsFirstRunGuideDone->value() )
+  {
+    settingsFirstRunGuideDone->setValue( true );
+  }
 }
 
 void QgsWelcomeScreen::hideScene()

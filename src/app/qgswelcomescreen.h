@@ -40,6 +40,8 @@ class QgsWelcomeScreenController : public QObject
 
     Q_INVOKABLE void openProject( const QString &path );
 
+    Q_INVOKABLE void openProjectDialog();
+
     Q_INVOKABLE void createBlankProject();
     Q_INVOKABLE void createProjectFromBasemap();
     Q_INVOKABLE void createProjectFromTemplate( const QString &path );
@@ -53,6 +55,12 @@ class QgsWelcomeScreenController : public QObject
     Q_INVOKABLE void hideScene();
 
     Q_INVOKABLE void forwardDrop( const QString &text, const QStringList &urls, const QVariantMap &formatsData );
+
+    Q_INVOKABLE void openUserManual();
+
+    Q_INVOKABLE void openKeyboardShortcuts();
+
+    Q_INVOKABLE void reportIssue();
 
   signals:
     void newVersionAvailable( const QString &versionString );
@@ -70,6 +78,7 @@ class QgsWelcomeScreen : public QQuickWidget
 
   public:
     static const QgsSettingsEntryBool *settingsCheckVersion SIP_SKIP;
+    static const QgsSettingsEntryBool *settingsFirstRunGuideDone SIP_SKIP;
 
     QgsWelcomeScreen( bool skipVersionCheck = false, QWidget *parent = nullptr );
     ~QgsWelcomeScreen() override = default;

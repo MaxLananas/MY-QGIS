@@ -1,0 +1,15 @@
+@background: #1e2228
+@itembackground: #272d35
+@itemalternativebackground: #39414d
+@itemdarkbackground: #3a434e
+@darkgradient: #2e3540
+@darkalternativegradient: #3b4450
+@gradient: #2e3540
+@textlight: #eef1f5
+@text: #ccd2da
+@toggleoff: #3a434e
+@toggleon: #3574f0
+@selection: #3574f0
+@hover: #454f5c
+@focusdark: rgba(107,164,255,110)
+@focus: #6ba4ff

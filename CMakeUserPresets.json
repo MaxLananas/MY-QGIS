@@ -1,0 +1,94 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "fast-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-fast",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WITH_DESKTOP": "ON",
+        "WITH_GUI": "ON",
+        "WITH_ANALYSIS": "ON",
+        "WITH_AUTH": "ON",
+        "WITH_PYTHON": "OFF",
+        "WITH_BINDINGS": "OFF",
+        "WITH_3D": "OFF",
+        "WITH_SERVER": "OFF",
+        "WITH_ORACLE": "OFF",
+        "WITH_HANA": "OFF",
+        "WITH_PDAL": "OFF",
+        "WITH_EPT": "OFF",
+        "WITH_GRASS7": "OFF",
+        "WITH_GRASS8": "OFF",
+        "WITH_GRASS_PLUGIN": "OFF",
+        "WITH_QUICK": "OFF",
+        "WITH_QTWEBENGINE": "OFF",
+        "WITH_PDF4QT": "OFF",
+        "WITH_CUSTOM_WIDGETS": "OFF",
+        "WITH_QGIS_PROCESS": "OFF",
+        "WITH_SFCGAL": "OFF",
+        "WITH_GEOGRAPHICLIB": "OFF",
+        "WITH_STAGED_PLUGINS": "OFF",
+        "WITH_QSPATIALITE": "OFF",
+        "WITH_APIDOC": "OFF",
+        "WITH_WAYLAND": "OFF",
+        "WITH_QTSERIALPORT": "OFF",
+        "ENABLE_TESTS": "OFF",
+        "ENABLE_MODELTEST": "OFF",
+        "WITH_INTERNAL_SPATIALINDEX": "ON",
+        "ENABLE_UNITY_BUILDS": "ON",
+        "USE_CCACHE": "ON"
+      }
+    },
+    {
+      "name": "fast",
+      "inherits": "fast-base",
+      "displayName": "⚡ Fast (Debug, no Python) — fastest iteration build",
+      "description": "Desktop only, no Python bindings, no server/providers extras, unity builds. Rebuilds in seconds-to-minutes with a warm ccache."
+    },
+    {
+      "name": "fast-python",
+      "inherits": "fast-base",
+      "displayName": "⚡ Fast + Python (Debug)",
+      "description": "Same as 'fast' but with Python bindings (processing toolbox, plugins). Slower than 'fast' but still minimal.",
+      "cacheVariables": {
+        "WITH_PYTHON": "ON",
+        "WITH_BINDINGS": "ON",
+        "WITH_STAGED_PLUGINS": "ON"
+      }
+    },
+    {
+      "name": "fast-release",
+      "inherits": "fast-python",
+      "displayName": "⚡ Fast + Python (Release) — minimal daily-driver build",
+      "description": "Minimal feature set with Python, optimized binaries. Use when you want a usable app, not just fast iteration.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "fast",
+      "configurePreset": "fast",
+      "targets": ["qgis"]
+    },
+    {
+      "name": "fast-python",
+      "configurePreset": "fast-python",
+      "targets": ["qgis"]
+    },
+    {
+      "name": "fast-release",
+      "configurePreset": "fast-release",
+      "targets": ["qgis"]
+    }
+  ]
+}

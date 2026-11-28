@@ -49,6 +49,7 @@
 #include <QInputDialog>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QShortcut>
 #include <QString>
@@ -929,6 +930,34 @@ void QgsDualView::viewWillShowContextMenu( QMenu *menu, const QModelIndex &maste
     QAction *copyRawContentAction = menu->addAction( tr( "Copy Raw Value (%1)" ).arg( previewRawValue ) );
     menu->addAction( copyRawContentAction );
     connect( copyRawContentAction, &QAction::triggered, this, [rawValue] { QApplication::clipboard()->setText( rawValue.toString() ); } );
+  }
+
+  // fork addition: copy the selected features' values of the clicked column
+  // as a ready-to-paste SQL IN() clause (handy for PostGIS/DB tooling)
+  QgsVectorLayer *vlSql = mFilterModel->layer();
+  if ( vlSql && !vlSql->selectedFeatureIds().isEmpty() )
+  {
+    const int sqlFieldIdx = masterIndex.data( static_cast<int>( QgsAttributeTableModel::CustomRole::FieldIndex ) ).toInt();
+    if ( sqlFieldIdx >= 0 && sqlFieldIdx < vlSql->fields().count() )
+    {
+      const QString sqlFieldName = vlSql->fields().at( sqlFieldIdx ).name();
+      QAction *copyInAction = menu->addAction( tr( "Copy Selected as SQL IN() (%1)" ).arg( sqlFieldName ) );
+      const QgsFeatureIds sqlSelectedFids = vlSql->selectedFeatureIds();
+      QPointer<QgsVectorLayer> layerGuard( vlSql );
+      connect( copyInAction, &QAction::triggered, this, [layerGuard, sqlSelectedFids, sqlFieldName, sqlFieldIdx] {
+        if ( !layerGuard )
+          return;
+        QgsFeatureRequest sqlRequest;
+        sqlRequest.setFilterFids( sqlSelectedFids );
+        sqlRequest.setSubsetOfAttributes( QgsAttributeList() << sqlFieldIdx );
+        QStringList sqlValues;
+        QgsFeature sqlFeature;
+        QgsFeatureIterator sqlIterator = layerGuard->getFeatures( sqlRequest );
+        while ( sqlIterator.nextFeature( sqlFeature ) )
+          sqlValues << QgsExpression::quotedValue( sqlFeature.attribute( sqlFieldIdx ) );
+        QApplication::clipboard()->setText( u"%1 IN (%2)"_s.arg( QgsExpression::quotedColumnRef( sqlFieldName ), sqlValues.join( ", "_L1 ) ) );
+      } );
+    }
   }
 
   QgsVectorLayer *vl = mFilterModel->layer();

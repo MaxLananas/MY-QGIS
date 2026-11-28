@@ -71,3 +71,13 @@ tests/testdata/plugindependencies_data.json
 tests/testdata/projects/test-project-with-relations.qgs
 tests/testdata/provider/testdata_pg_relations.sql
 mac/development.md
+# fork: documentation and CI files intentionally written in French
+ARCHITECTURE-AUDIT.md
+BENCHMARKS.md
+FORK-NOTES.md
+.github/workflows/fast-build.yml
+.github/workflows/perf-bench.yml
+scripts/perf/qgis-perf-bench.py
+scripts/perf/ab_summary.py
+src/app/qml/WelcomeScreen.qml
+resources/themes/Aurora Light/.*

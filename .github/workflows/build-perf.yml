@@ -1,0 +1,474 @@
+name: 🏗 Build performance benchmark
+
+# Measures the REAL build time of a complete QGIS fork build (ALL target,
+# PyQGIS bindings included) across four reproducible scenarios:
+#   S1 cold         — no ccache at all
+#   S2 warm         — full ccache restored on a fresh runner
+#   S3 incremental  — one C++ TU modified, rebuild
+#   S4 dependency   — a widely-included header modified, rebuild (worst case)
+# plus S0 (serial -j1 profile of qgis_core for the named slowest-TU list)
+# and a linker A/B (default bfd vs mold, isolated because compile edges are
+# cache hits when only the linker changes).
+#
+# Targets: full build < 5 min where the hardware allows it; incremental < 2
+# min. The analyzer computes the busy-core-seconds floor so the verdict is
+# data-driven, never assumed. If < 5 min is impossible on 4 vCPU, the floor
+# math proves it and states the core count required.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build-perf.yml'
+      - 'scripts/build-perf/**'
+      - 'scripts/qgis-fastbuild.sh'
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  BUILD_IMAGE: qgis/qgis3-ubuntu-qt6-build-deps:master
+  # identical to perf-bench flags so the ccache is interchangeable
+  BASE_FLAGS: "-G Ninja -DCMAKE_BUILD_TYPE=Release -DUSE_CCACHE=ON -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF -DWITH_PDAL=OFF -DWITH_EPT=ON -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON"
+
+jobs:
+  s1-cold:
+    name: S1 · cold full build
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🧹 Reclaim disk space
+        run: sudo rm -rf /usr/local/lib/android/ || true
+      - name: 🐳 Pull the full QGIS build-deps image
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
+      # deliberately NO cache restore: pure cold scenario
+      - name: 🌋 Cold build (ALL target, PyQGIS included)
+        run: |
+          mkdir -p results .ccache
+          # peak-memory sampler
+          ( while :; do awk '/MemAvailable/{print $2}' /proc/meminfo >> results/memavail.log; sleep 1; done ) &
+          SAMPLER=$!
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
+            --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content && ccache -z
+              echo "nproc=$(nproc)" >> /root/QGIS/results/env.txt
+              T0=$(date +%s%3N)
+              cmake -S /root/QGIS -B /root/QGIS/build-cold $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
+              T1=$(date +%s%3N); echo "configure_ms $((T1-T0))" >> /root/QGIS/results/timings.txt
+              T2=$(date +%s%3N)
+              cmake --build /root/QGIS/build-cold > /root/QGIS/results/build.log 2>&1
+              T3=$(date +%s%3N); echo "build_ms $((T3-T2))" >> /root/QGIS/results/timings.txt
+              ccache -s | tail -8 > /root/QGIS/results/ccache_stats.txt
+              cp /root/QGIS/build-cold/.ninja_log /root/QGIS/results/ninja_log.txt
+              echo "== toolchain ==" && gcc --version | head -1
+            ' || {
+              echo "BUILD_FAILED" >> results/timings.txt
+              grep -aiE "error:|Error|killed" results/build.log 2>/dev/null | tail -6 || true
+              exit 1
+            }
+          kill $SAMPLER 2>/dev/null || true
+          awk 'BEGIN{m=1e18} {if ($1 < m) m = $1} END {print "peak_used_mb", (16000000 - m) / 1024}' results/memavail.log >> results/timings.txt || true
+          cat results/timings.txt
+          WALL=$(awk '/^build_ms/{print $2}' results/timings.txt)
+          python3 scripts/build-perf/analyze_ninja_log.py --mode parallel --log results/ninja_log.txt \
+            --wall-ms "$WALL" --json results/ninja_analysis.json --markdown results/ninja_analysis.md
+          python3 scripts/build-perf/analyze_ninja_log.py --selftest
+      - name: 📊 Summary
+        if: always()
+        run: |
+          echo "## S1 · cold full build" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/timings.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/ninja_analysis.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: 🧯 Failure diagnosis → REST check-run summary
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("S1")) | .id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          {
+            echo "=== timings ==="; cat results/timings.txt 2>/dev/null || echo none
+            echo "=== configure.log tail ==="; tail -n 25 results/configure.log 2>/dev/null || echo none
+            echo "=== build.log tail ==="; tail -n 35 results/build.log 2>/dev/null || echo none
+            echo "=== ccache ==="; cat results/ccache_stats.txt 2>/dev/null || echo none
+          } > /tmp/diag.txt
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "S1 cold build failure diagnosis", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "diagnosis posted"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-s1-cold
+          path: results/
+      - name: 💾 Save warm cache seed
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: buildperf-warm-${{ github.run_id }}
+
+  s2-warm:
+    name: S2 · warm full build (fresh runner, full cache)
+    needs: s1-cold
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🧹 Reclaim disk space
+        run: sudo rm -rf /usr/local/lib/android/ || true
+      - name: 🐳 Pull the full QGIS build-deps image
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
+      - name: 💾 Restore warm cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: buildperf-warm-${{ github.run_id }}
+          restore-keys: |
+            buildperf-warm-
+            perfbench-ccache-
+            fastbuild-ccache-fast-python-
+      - name: 🌋 Warm build ×2 (fresh build dir each time)
+        run: |
+          mkdir -p results
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
+            --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              for i in 1 2; do
+                rm -rf /root/QGIS/build-warm
+                T0=$(date +%s%3N)
+                cmake -S /root/QGIS -B /root/QGIS/build-warm $BASE_FLAGS > /root/QGIS/results/configure_$i.log 2>&1
+                T1=$(date +%s%3N)
+                cmake --build /root/QGIS/build-warm > /root/QGIS/results/build_warm_$i.log 2>&1
+                T2=$(date +%s%3N)
+                echo "warm_total_ms_$i $((T2-T0))" >> /root/QGIS/results/timings.txt
+                echo "warm_configure_ms_$i $((T1-T0))" >> /root/QGIS/results/timings.txt
+                echo "warm_build_ms_$i $((T2-T1))" >> /root/QGIS/results/timings.txt
+                if [ $i -eq 1 ]; then cp /root/QGIS/build-warm/.ninja_log /root/QGIS/results/ninja_log_warm.txt; fi
+              done
+              ccache -s | tail -8 > /root/QGIS/results/ccache_stats.txt
+            ' || { echo "BUILD_FAILED"; grep -aiE "error:|Error|killed" results/build_warm_1.log 2>/dev/null | tail -6 || true; exit 1; }
+          WALL=$(awk '/^warm_build_ms_1/{print $2}' results/timings.txt)
+          python3 scripts/build-perf/analyze_ninja_log.py --mode parallel --log results/ninja_log_warm.txt \
+            --wall-ms "$WALL" --json results/ninja_analysis.json --markdown results/ninja_analysis.md
+      - name: 📊 Summary
+        if: always()
+        run: |
+          { echo "## S2 · warm full build"; echo '```'; cat results/timings.txt 2>/dev/null; echo '```'; echo '```'; cat results/ccache_stats.txt 2>/dev/null; echo '```'; cat results/ninja_analysis.md 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-s2-warm
+          path: results/
+
+  s3-incremental:
+    name: S3 · incremental (1 TU ×3)
+    needs: s2-warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🧹 Reclaim disk space
+        run: sudo rm -rf /usr/local/lib/android/ || true
+      - name: 🐳 Pull the full QGIS build-deps image
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
+      - name: 💾 Restore warm cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: buildperf-warm-${{ github.run_id }}
+          restore-keys: buildperf-warm-
+      - name: 🌋 Warm build, then 1-TU edit ×3
+        run: |
+          mkdir -p results
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
+            --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              cmake -S /root/QGIS -B /root/QGIS/build-incr $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
+              cmake --build /root/QGIS/build-incr > /root/QGIS/results/baseline.log 2>&1
+              for TU in src/app/qgisapp.cpp src/app/qgswelcomescreen.cpp src/app/qgsattributetabledialog.cpp; do
+                echo "// build-perf probe $(date +%s)" >> /root/QGIS/$TU
+                T0=$(date +%s%3N)
+                cmake --build /root/QGIS/build-incr > /root/QGIS/results/incr_$(basename $TU).log 2>&1
+                T1=$(date +%s%3N)
+                echo "incr_$(basename $TU)_ms $((T1-T0))" >> /root/QGIS/results/timings.txt
+                git -C /root/QGIS checkout -q $TU
+              done
+              ccache -s | tail -4 > /root/QGIS/results/ccache_stats.txt
+            ' || { echo "BUILD_FAILED"; exit 1; }
+          cat results/timings.txt
+      - name: 📊 Summary
+        if: always()
+        run: |
+          echo "## S3 · incremental (1 TU)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat results/timings.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-s3-incremental
+          path: results/
+
+  s4-dependency:
+    name: S4 · dependency-style (core header)
+    needs: s2-warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🧹 Reclaim disk space
+        run: sudo rm -rf /usr/local/lib/android/ || true
+      - name: 🐳 Pull the full QGIS build-deps image
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
+      - name: 💾 Restore warm cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: buildperf-warm-${{ github.run_id }}
+          restore-keys: buildperf-warm-
+      - name: 🌋 Touch widely-included header, rebuild
+        run: |
+          mkdir -p results
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
+            --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              cmake -S /root/QGIS -B /root/QGIS/build-dep $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
+              cmake --build /root/QGIS/build-dep > /root/QGIS/results/baseline.log 2>&1
+              echo "// build-perf probe $(date +%s)" >> /root/QGIS/src/core/qgis.h
+              T0=$(date +%s%3N)
+              cmake --build /root/QGIS/build-dep > /root/QGIS/results/build_dep.log 2>&1
+              T1=$(date +%s%3N)
+              echo "dep_total_ms $((T1-T0))" >> /root/QGIS/results/timings.txt
+              cp /root/QGIS/build-dep/.ninja_log /root/QGIS/results/ninja_log_dep.txt
+              ccache -s | tail -4 > /root/QGIS/results/ccache_stats.txt
+            ' || { echo "BUILD_FAILED"; grep -aiE "error:|killed" results/build_dep.log 2>/dev/null | tail -6 || true; exit 1; }
+          WALL=$(awk '/^dep_total_ms/{print $2}' results/timings.txt)
+          python3 scripts/build-perf/analyze_ninja_log.py --mode parallel --log results/ninja_log_dep.txt \
+            --wall-ms "$WALL" --json results/ninja_analysis.json --markdown results/ninja_analysis.md
+      - name: 📊 Summary
+        if: always()
+        run: |
+          echo "## S4 · dependency-style rebuild" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat results/timings.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat results/ninja_analysis.md 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-s4-dependency
+          path: results/
+
+  s0-profile-serial:
+    name: S0 · serial profile of qgis_core (named slowest TUs)
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🧹 Reclaim disk space
+        run: sudo rm -rf /usr/local/lib/android/ || true
+      - name: 🐳 Pull the full QGIS build-deps image
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
+      - name: 🌋 Serial (-j1 -v) qgis_core build
+        run: |
+          mkdir -p results
+          docker run --rm -v $(pwd):/root/QGIS -e BASE_FLAGS="${BASE_FLAGS}" \
+            --env-file .docker/docker-variables.env \
+            "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              git config --global --add safe.directory /root/QGIS
+              cmake -S /root/QGIS -B /root/QGIS/build-serial $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
+              T0=$(date +%s%3N)
+              cmake --build /root/QGIS/build-serial --target qgis_core -- -j1 -v 2>&1 \
+                | while IFS= read -r line; do echo "$(date +%s%3N) $line"; done > /root/QGIS/results/serial_core.log
+              T1=$(date +%s%3N); echo "serial_core_ms $((T1-T0))" >> /root/QGIS/results/timings.txt
+            ' || { echo "BUILD_FAILED"; exit 1; }
+          WALL=$(awk '/^serial_core_ms/{print $2}' results/timings.txt)
+          python3 scripts/build-perf/analyze_ninja_log.py --mode serial-v --log results/serial_core.log \
+            --wall-ms "$WALL" --json results/ninja_analysis.json --markdown results/ninja_analysis.md --top 25
+      - name: 📊 Summary
+        if: always()
+        run: |
+          echo "## S0 · serial qgis_core profile" >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/timings.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY" || true
+          cat results/ninja_analysis.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+      - name: 🧯 Failure diagnosis → REST check-run summary
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("S0")) | .id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          {
+            echo "=== timings ==="; cat results/timings.txt 2>/dev/null || echo none
+            echo "=== configure.log tail ==="; tail -n 25 results/configure.log 2>/dev/null || echo none
+            echo "=== serial_core.log tail ==="; tail -n 35 results/serial_core.log 2>/dev/null || echo none
+          } > /tmp/diag.txt
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "S0 serial profile failure diagnosis", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "diagnosis posted"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-s0-serial
+          path: results/
+
+  linker-ab:
+    name: Linker A/B · bfd vs mold
+    needs: s2-warm
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: 🧹 Reclaim disk space
+        run: sudo rm -rf /usr/local/lib/android/ || true
+      - name: 🐳 Pull the full QGIS build-deps image
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Pull failed — building the FULL image locally (one-time slow path)."
+            docker build -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile -t "${BUILD_IMAGE}" .
+          }
+      - name: 💾 Restore warm cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: buildperf-warm-${{ github.run_id }}
+          restore-keys: buildperf-warm-
+      - name: 🌋 Same objects, two linkers
+        run: |
+          mkdir -p results
+          docker run --rm -v $(pwd):/root/QGIS -v $(pwd)/.ccache:/root/.ccache -e BASE_FLAGS="${BASE_FLAGS}" \
+            --env-file .docker/docker-variables.env -e CCACHE_DIR=/root/.ccache \
+            "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              git config --global --add safe.directory /root/QGIS
+              ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              cmake -S /root/QGIS -B /root/QGIS/build-link $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
+              cmake --build /root/QGIS/build-link > /root/QGIS/results/baseline.log 2>&1
+              find /root/QGIS/build-link -name "*.o" -delete
+              T0=$(date +%s%3N)
+              cmake --build /root/QGIS/build-link > /root/QGIS/results/link_default.log 2>&1
+              T1=$(date +%s%3N); echo "link_bfd_ms $((T1-T0))" >> /root/QGIS/results/timings.txt
+              cmake -S /root/QGIS -B /root/QGIS/build-link $BASE_FLAGS -DUSE_ALTERNATE_LINKER=mold > /root/QGIS/results/configure_mold.log 2>&1 \
+                || echo "mold_configure_failed" >> /root/QGIS/results/timings.txt
+              if ! grep -q mold_configure_failed /root/QGIS/results/timings.txt; then
+                T2=$(date +%s%3N)
+                cmake --build /root/QGIS/build-link > /root/QGIS/results/link_mold.log 2>&1 \
+                  && { T3=$(date +%s%3N); echo "link_mold_ms $((T3-T2))" >> /root/QGIS/results/timings.txt; } \
+                  || { echo "mold_link_failed" >> /root/QGIS/results/timings.txt; grep -aiE "error" /root/QGIS/results/link_mold.log | tail -4; }
+              fi
+            ' || { echo "BUILD_FAILED"; exit 1; }
+          cat results/timings.txt
+      - name: 📊 Summary
+        if: always()
+        run: |
+          echo "## Linker A/B (compile edges are ccache hits — only links differ)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat results/timings.txt 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: results-linker-ab
+          path: results/
+
+  aggregate:
+    name: 📈 Aggregate verdict
+    needs: [s1-cold, s2-warm, s3-incremental, s4-dependency, linker-ab, s0-profile-serial]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@95815c38cf2ff848e9b14f7fd5a7d1b6fe1add3f # v7.0.0
+        with:
+          pattern: results-*
+          path: artifacts/
+      - name: 📈 Assemble the verdict (REST-readable)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/build-perf/aggregate.py artifacts/ --markdown /tmp/verdict.md
+          {
+            echo "=== verdict ==="
+            cat /tmp/verdict.md
+            echo "=== S0 timings ==="
+            cat artifacts/results-s0-serial/timings.txt 2>/dev/null || echo none
+            echo "=== S1 timings ==="
+            cat artifacts/results-s1-cold/timings.txt 2>/dev/null || echo none
+            echo "=== ccache (S1) ==="
+            cat artifacts/results-s1-cold/ccache_stats.txt 2>/dev/null || echo none
+          } > /tmp/diag.txt
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | select(.name | startswith("📈")) | .id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "Build performance verdict", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "verdict posted"

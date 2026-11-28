@@ -1,0 +1,285 @@
+name: 📊 Performance benchmark
+
+# NOTE (fork): builds QGIS with the minimal fast configuration (WITH_PYTHON=ON
+# so PyQGIS is available), then runs the real PyQGIS benchmark suite
+# (scripts/perf/qgis-perf-bench.py) headlessly inside the QGIS build-deps
+# Docker image and publishes the full timing table to the run summary.
+# Manual only — never runs automatically, costs nothing unless clicked.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A full A/B (fork + upstream builds + benches) takes well over an hour:
+  # never cancel a running benchmark, or every push wipes the results.
+  cancel-in-progress: false
+
+on:
+  # Runs automatically ONLY when a PR touches the perf files themselves
+  # (no cost otherwise); A/B comparison is on by default in that case.
+  pull_request:
+    paths:
+      - 'scripts/perf/**'
+      - 'scripts/bench-build.sh'
+      - '.github/workflows/perf-bench.yml'
+  workflow_dispatch:
+    inputs:
+      features:
+        description: 'Synthetic point features for the benchmark dataset'
+        required: false
+        default: '100000'
+      compare_upstream:
+        description: 'Also build upstream qgis/QGIS master and compare on the same runner'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      runner:
+        description: 'Runner (bigger = faster but billed even on public repos)'
+        required: false
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - ubuntu-latest-4-cores
+          - ubuntu-latest-8-cores
+          - ubuntu-latest-16-cores
+
+permissions:
+  contents: read
+  # failure diagnosis is written back to the check-run (output summary +
+  # annotations) so it is readable via the REST API from anywhere.
+  checks: write
+
+env:
+  # The FULL build-deps image (the binary-only Docker Hub target stops before
+  # the toolchain layer: no ccache, flex, libzip-dev, clang or mold — the
+  # real upstream CI compiles QGIS inside the full image).
+  BUILD_IMAGE: qgis/qgis3-ubuntu-qt6-build-deps:master
+  BUILD_DIR: /root/QGIS/build-perf
+
+jobs:
+  bench:
+    name: perf benchmark (linux)
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    timeout-minutes: 360
+
+    steps:
+      - name: 🐣 Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 🧹 Reclaim disk space
+        run: |
+          df . -h
+          sudo rm -rf /usr/local/lib/android/ || true
+          df . -h
+
+      - name: 🐳 Pull the full QGIS build-deps image (local-build fallback)
+        run: |
+          docker pull "${BUILD_IMAGE}" || {
+            echo "::warning::Prebuilt image pull failed — building the FULL image locally (one-time slow path)."
+            docker build \
+              -f .docker/qgis3-ubuntu-qt6-build-deps.dockerfile \
+              -t "${BUILD_IMAGE}" .
+          }
+
+      - name: 💾 Restore ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: perfbench-ccache-${{ github.run_id }}
+          restore-keys: |
+            perfbench-ccache-
+            fastbuild-ccache-fast-python-
+
+      # One pass: build the fork, benchmark it, then (optional) build upstream
+      # qgis/QGIS master with identical flags and benchmark it too — a true
+      # A/B on the same runner, same compiler, same data, shared ccache
+      # (the reference build warms the cache; the fork build then only pays
+      # for its own deltas).
+      - name: 🌋 Build + run benchmark (fork vs upstream)
+        run: |
+          mkdir -p perf-results
+          docker run --rm             -v $(pwd):/root/QGIS             -v $(pwd)/.ccache:/root/.ccache             --env-file .docker/docker-variables.env             -e CCACHE_DIR=/root/.ccache             "${BUILD_IMAGE}" bash -c '
+              set -eo errtrace
+              trap "printf \"FAILED rc=%s cmd=%s\n\" \"\$?\" \"\$BASH_COMMAND\" > /root/QGIS/perf-results/lastcmd.txt" ERR
+              git config --global --add safe.directory /root/QGIS
+
+              # Preflight: the bin-only image ships clang/mold/ninja but not
+              # ccache; install it on the fly and pick compilers/linker that
+              # actually exist. Both A/B sides use the SAME resolved flags.
+              if ! command -v ccache >/dev/null 2>&1 || ! command -v flex >/dev/null 2>&1 || ! command -v mold >/dev/null 2>&1; then
+                apt-get update -qq
+                DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ccache flex bison mold
+              fi
+              if command -v mold >/dev/null 2>&1 && false; then
+                # NOTE: mold was observed failing on ZSTD symbol ordering when
+                # linking QGIS with system Qt6 in this image (run 45925892699)
+                # — GNU ld resolves it. Disabled until root-caused.
+                LINKER_FLAG="-DUSE_ALTERNATE_LINKER=mold"
+              else
+                # Leave USE_ALTERNATE_LINKER unset = system default linker
+                # (linker.cmake FATAL_ERRORs on any unknown value).
+                LINKER_FLAG=""
+              fi
+              if [ -x /usr/bin/clang ] && [ -x /usr/bin/clang++ ]; then
+                CC_FLAG="-DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++"
+              else
+                CC_FLAG="-DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++"
+              fi
+              echo "==> Toolchain: $(clang --version 2>/dev/null | head -1 || gcc --version | head -1) / linker_flag=$LINKER_FLAG"
+
+              ccache -M 2G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
+              ccache --set-config inode_cache=true || true
+              ccache -z
+
+              # WITH_EPT=ON is required: the EPT=OFF combination leaves
+              # QgsEptPointCloudIndex undefined at link time (run 45925892699) —
+              # upstream CI never exercises EPT=OFF.
+              BUILD_FLAGS="-G Ninja -DCMAKE_BUILD_TYPE=Release                 -DCMAKE_C_FLAGS_DEBUG=-g1 -DCMAKE_CXX_FLAGS_DEBUG=-g1                 -DUSE_CCACHE=ON                 -DWITH_DESKTOP=ON -DWITH_GUI=ON -DWITH_ANALYSIS=ON                 -DWITH_PYTHON=ON -DWITH_BINDINGS=ON -DWITH_STAGED_PLUGINS=ON                 -DWITH_3D=OFF -DWITH_SERVER=OFF -DWITH_ORACLE=OFF -DWITH_HANA=OFF                 -DWITH_PDAL=OFF -DWITH_EPT=ON -DWITH_GRASS7=OFF -DWITH_GRASS8=OFF                 -DWITH_GRASS_PLUGIN=OFF -DWITH_QUICK=OFF -DWITH_QTWEBENGINE=OFF                 -DWITH_PDF4QT=OFF -DWITH_CUSTOM_WIDGETS=OFF -DWITH_QGIS_PROCESS=OFF                 -DWITH_SFCGAL=OFF -DWITH_GEOGRAPHICLIB=OFF -DWITH_QSPATIALITE=OFF                 -DWITH_WAYLAND=OFF -DWITH_QTSERIALPORT=OFF -DWITH_APIDOC=OFF                 -DENABLE_TESTS=OFF -DENABLE_MODELTEST=OFF                 -DWITH_INTERNAL_SPATIALINDEX=ON -DENABLE_UNITY_BUILDS=ON $CC_FLAG $LINKER_FLAG"
+
+              mkdir -p /root/QGIS/perf-results
+
+              run_bench() {
+                local LABEL="$1" TREE="$2" BUILD="$3"
+                # PyQGIS staging lives in $BUILD/output/python; UTF-8 locale
+                # required by Qt/QGIS python (C/ANSI_X3.4 warns otherwise).
+                # The bench script itself always comes from the FORK tree:
+                # /root/QGIS-ref (upstream) does not contain it.
+                export LANG=C.UTF-8 LC_ALL=C.UTF-8
+                export QGIS_OUTPUT="$BUILD/output"
+                export PYTHONPATH="$QGIS_OUTPUT/python:$PYTHONPATH"
+                export LD_LIBRARY_PATH="$QGIS_OUTPUT/lib:$LD_LIBRARY_PATH"
+                export QT_QPA_PLATFORM=offscreen
+                cd "$TREE"
+                python3 /root/QGIS/scripts/perf/qgis-perf-bench.py                   --data-dir /tmp/qgis-perf-bench-data                   --features ${{ inputs.features || 100000 }}                   --repeats 5                   --json "/root/QGIS/perf-results/bench-$LABEL.json"                   --markdown "/root/QGIS/perf-results/bench-$LABEL.md"                   --label "$LABEL"
+              }
+
+              # ---- 1) the fork -------------------------------------------------
+              echo "==> Building the FORK tree"
+              if [ ! -f '"${BUILD_DIR}"'/CMakeCache.txt ]; then
+                cmake -S /root/QGIS -B '"${BUILD_DIR}"' $BUILD_FLAGS
+              fi
+              # Default (ALL) target: also builds the PyQGIS sip bindings
+              # (pycore/pygui/pyanalysis) and stages plugins into output/.
+              # `--target qgis` alone stops before the bindings, and the bench
+              # dies on "No module named qgis._core" (run 45984981383).
+              cmake --build '"${BUILD_DIR}"'
+              run_bench fork /root/QGIS '"${BUILD_DIR}"'
+
+              # ---- 2) upstream reference (optional) -----------------------------
+              if [ "${{ inputs.compare_upstream || 'true' }}" = "true" ]; then
+                echo "==> Building upstream qgis/QGIS master (same flags, shared ccache)"
+                git clone --depth 1 https://github.com/qgis/QGIS.git /root/QGIS-ref
+                git config --global --add safe.directory /root/QGIS-ref
+                cmake -S /root/QGIS-ref -B /root/QGIS-ref/build-perf $BUILD_FLAGS
+                cmake --build /root/QGIS-ref/build-perf
+                run_bench reference /root/QGIS-ref /root/QGIS-ref/build-perf
+                echo "==> A/B complete: fork vs reference"
+              else
+                echo "==> Upstream comparison skipped (input)"
+              fi
+
+              echo "==> ccache statistics:"
+              ccache -s | tail -6
+            ' > perf-results/buildlog.txt 2>&1 || {
+              grep -aiE "CMake Error|Could ?NOT find|Could not find|Configuring incomplete|ninja: error|error:|Traceback|RuntimeError|ImportError|FileNotFoundError" perf-results/buildlog.txt 2>/dev/null | tail -12 > perf-results/errors.txt
+              if [ ! -s perf-results/errors.txt ]; then
+                # No recognisable error text (e.g. OOM-killed compile): fall
+                # back to the raw tail so the diagnosis still has content.
+                tail -n 20 perf-results/buildlog.txt 2>/dev/null > perf-results/errors.txt
+              fi
+              {
+                echo "### 🔥 Build/bench failure diagnosis"
+                echo ""
+                echo '```'
+                cat perf-results/lastcmd.txt 2>/dev/null || true
+                cat perf-results/errors.txt 2>/dev/null || true
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            }
+
+      - name: 🧯 Report failure as REST annotations
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Step-log ::error:: lines proved unreliable for this job — post the
+          # captured diagnosis as check-run output summary (readable via
+          # GET /check-runs/{id} -> .output.summary) + annotations (<=240 chars).
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[0].id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          {
+            echo "=== last failing command (ERR trap) ==="
+            cat perf-results/lastcmd.txt 2>/dev/null || echo "(none)"
+            echo "=== captured error lines ==="
+            cat perf-results/errors.txt 2>/dev/null || echo "(none)"
+            echo "=== buildlog tail (last 80 lines) ==="
+            tail -n 80 perf-results/buildlog.txt 2>/dev/null || echo "(none)"
+          } > /tmp/diag.txt
+          jq -n --rawfile s /tmp/diag.txt '{output: {title: "perf-bench failure diagnosis", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json >/dev/null
+          jq -Rn '[inputs | select(length>0) | {path: ".github/workflows/perf-bench.yml", start_line: 1, end_line: 1, annotation_level: "failure", message: (.[0:240])}]' \
+            perf-results/lastcmd.txt perf-results/errors.txt > /tmp/anns.json
+          gh api --method POST "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID/annotations" --input /tmp/anns.json >/dev/null || true
+          echo "diagnosis posted"
+
+      - name: 📊 Publish benchmark summary
+        if: always()
+        run: |
+          {
+            echo "## 📊 QGIS performance benchmark — fork vs upstream"
+            echo ""
+            echo "Same runner, same compiler, same deterministic dataset (seed 20261126), 5 runs per metric (median / p10 / p90)."
+            echo ""
+            echo "### Fork (this branch)"
+            echo ""
+            if [ -f perf-results/bench-fork.md ]; then
+              cat perf-results/bench-fork.md
+            else
+              echo "Fork benchmark did not complete — check the build+run logs."
+            fi
+            if [ -f perf-results/bench-reference.md ]; then
+              echo ""
+              echo "### Reference (upstream qgis/QGIS master)"
+              echo ""
+              cat perf-results/bench-reference.md
+              echo ""
+              echo "### Fork delta vs reference (median)"
+              echo ""
+              python3 scripts/perf/ab_summary.py perf-results/bench-fork.json perf-results/bench-reference.json
+            fi
+          } | tee /tmp/ab-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 📎 Upload raw benchmark results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-results
+          path: |
+            perf-results/
+            /tmp/ab-summary.md
+
+      - name: 🧯 Publish verdict to REST check-run summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JOB_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[0].id')
+          CR_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB_ID" --jq '.check_run_url' | awk -F/ '{print $NF}')
+          jq -n --rawfile s /tmp/ab-summary.md '{output: {title: "A/B fork vs upstream — results", summary: $s}}' > /tmp/patch.json
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/check-runs/$CR_ID" --input /tmp/patch.json && echo "verdict posted"
+
+      - name: 💾 Save ccache
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ccache
+          key: perfbench-ccache-${{ github.run_id }}

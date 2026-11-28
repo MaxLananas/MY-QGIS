@@ -2969,7 +2969,7 @@ void QgisApp::applyDefaultSettingsToCanvas( QgsMapCanvas *canvas )
 void QgisApp::readSettings()
 {
   QgsSettings settings;
-  const QString themeName = settings.value( u"UI/UITheme"_s, "default" ).toString();
+  const QString themeName = settings.value( u"UI/UITheme"_s, u"Aurora"_s ).toString();
   setTheme( themeName );
 
   // Read legacy settings
@@ -3467,6 +3467,13 @@ void QgisApp::createMenus()
 
   // Connect once for the entire submenu.
   connect( mRecentProjectsMenu, &QMenu::triggered, this, static_cast<void ( QgisApp::* )( QAction *action )>( &QgisApp::openProject ) );
+
+  // Project menu: re-open the welcome screen on demand
+  QAction *actionShowWelcomeScreen = new QAction( tr( "Welcome Screen" ), this );
+  actionShowWelcomeScreen->setObjectName( u"mActionShowWelcomeScreen"_s );
+  connect( actionShowWelcomeScreen, &QAction::triggered, this, [this] { mWelcomeScreen->showScene(); } );
+  mProjectMenu->insertAction( mActionNewProject, actionShowWelcomeScreen );
+  mProjectMenu->insertSeparator( mActionNewProject );
 
   // View Menu
 
