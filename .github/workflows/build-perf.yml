@@ -65,7 +65,10 @@ jobs:
             "${BUILD_IMAGE}" bash -c '
               set -eo errtrace
               git config --global --add safe.directory /root/QGIS
-              ccache -M 5G && ccache -z
+              ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content && ccache -z
               echo "nproc=$(nproc)" >> /root/QGIS/results/env.txt
               T0=$(date +%s%3N)
               cmake -S /root/QGIS -B /root/QGIS/build-cold $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
@@ -158,6 +161,9 @@ jobs:
               set -eo errtrace
               git config --global --add safe.directory /root/QGIS
               ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
               for i in 1 2; do
                 rm -rf /root/QGIS/build-warm
                 T0=$(date +%s%3N)
@@ -217,6 +223,9 @@ jobs:
               set -eo errtrace
               git config --global --add safe.directory /root/QGIS
               ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
               cmake -S /root/QGIS -B /root/QGIS/build-incr $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
               cmake --build /root/QGIS/build-incr > /root/QGIS/results/baseline.log 2>&1
               for TU in src/app/qgisapp.cpp src/app/qgswelcomescreen.cpp src/app/qgsattributetabledialog.cpp; do
@@ -275,6 +284,9 @@ jobs:
               set -eo errtrace
               git config --global --add safe.directory /root/QGIS
               ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
               cmake -S /root/QGIS -B /root/QGIS/build-dep $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
               cmake --build /root/QGIS/build-dep > /root/QGIS/results/baseline.log 2>&1
               echo "// build-perf probe $(date +%s)" >> /root/QGIS/src/core/qgis.h
@@ -396,6 +408,9 @@ jobs:
               set -eo errtrace
               git config --global --add safe.directory /root/QGIS
               ccache -M 5G
+              ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
+              ccache --set-config hash_dir=false
+              ccache --set-config compiler_check=content
               cmake -S /root/QGIS -B /root/QGIS/build-link $BASE_FLAGS > /root/QGIS/results/configure.log 2>&1
               cmake --build /root/QGIS/build-link > /root/QGIS/results/baseline.log 2>&1
               find /root/QGIS/build-link -name "*.o" -delete
