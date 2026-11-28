@@ -594,7 +594,7 @@ def main():
 
     # ---- report -------------------------------------------------------------
     rows = bench.table()
-    version = "%s %s" % (Qgis.QGIS_VERSION, Qgis.QGIS_VERSION_CODE)
+    version = "%s (%s)" % (Qgis.version(), Qgis.QGIS_VERSION_INT)
     env = {
         "qgis": version,
         "qt": Qgis.QT_VERSION_STR if hasattr(Qgis, "QT_VERSION_STR") else "",
